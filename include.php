@@ -17,6 +17,7 @@ Loader::registerAutoLoadClasses(
 		'Derykams\FieldAudit\FillController' => 'lib/FillController.php',
 		'Derykams\FieldAudit\Integration' => 'lib/Integration.php',
 		'Derykams\FieldAudit\RuleConfig' => 'lib/RuleConfig.php',
+		'Derykams\FieldAudit\Diagnostics' => 'lib/Diagnostics.php',
 	)
 );
 ?>

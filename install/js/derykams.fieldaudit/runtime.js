@@ -1,11 +1,24 @@
 (function () {
   'use strict';
-  if (!window.BX || BX.FieldAuditRuntime) return;
+  var logRecords = [];
+  function log(event, details, level) {
+    var record = {time: new Date().toISOString(), event: event, data: details || {}};
+    logRecords.push(record);
+    if (logRecords.length > 200) logRecords.shift();
+    if (window.console && typeof console[level || 'info'] === 'function') {
+      console[level || 'info']('[FieldAudit] ' + event, record.data);
+    }
+  }
+
+  function initialize() {
+  if (!window.BX || typeof BX.addCustomEvent !== 'function') return false;
+  if (BX.FieldAuditRuntime) return true;
 
   var activeToken = null;
   var popup = null;
   var seen = Object.create(null);
   var queue = [];
+  var progressControls = Object.create(null);
   var marker = /\[DERYKAMS_FIELDAUDIT:([a-f0-9]{48})\]/g;
 
   function clean(value) {
@@ -29,6 +42,7 @@
   }
 
   function request(action, body) {
+    log('request.begin', {action: action, challenge: (activeToken || '').slice(0, 8)});
     var data = body instanceof FormData ? body : new FormData();
     if (!(body instanceof FormData)) {
       Object.keys(body).forEach(function (key) { data.append(key, body[key]); });
@@ -45,6 +59,7 @@
         error.tokens = tokens(response.errors);
         throw error;
       }
+      log('request.success', {action: action, dealId: response.data && response.data.dealId});
       return response.data;
     });
   }
@@ -84,6 +99,7 @@
   }
 
   function show(data) {
+    log('popup.build', {dealId: data.dealId, fieldIds: data.fields.map(function (field) { return field.id; }), requirements: data.requirements});
     var root = node('div', null, 'fa-runtime');
     var instructions = node('div', null, 'fa-runtime-requirements');
     var byId = {};
@@ -141,6 +157,7 @@
           var matches = requirement.fieldIds.map(function (id) { return Boolean(filled[id]); });
           return requirement.mode === 'any' ? !matches.some(Boolean) : !matches.every(Boolean);
         });
+        log('popup.fill_check', {dealId: data.dealId, filled: filled, satisfied: !missing});
         if (missing) { errorBox.textContent = 'Выполните указанные условия заполнения.'; return; }
         form.append('valuesJson', JSON.stringify(values));
         submitting = true;
@@ -153,6 +170,7 @@
           // Обновление показывает сохранённые значения и фактическую стадию на обеих страницах.
           window.location.reload();
         }).catch(function (error) {
+          log('popup.save_error', {message: clean(error.message)}, 'error');
           submitting = false;
           save.setName('Сохранить и продолжить');
           save.getContainer().removeAttribute('aria-disabled');
@@ -161,25 +179,56 @@
         });
       }}
     });
-    var cancel = new BX.PopupWindowButtonLink({text: 'Отмена', events: {click: function () { if (!submitting) popup.close(); }}});
+    var cancel = new BX.PopupWindowButtonLink({text: 'Отмена', events: {click: function () {
+      if (!submitting) {
+        log('popup.cancel', {dealId: data.dealId, challenge: data.token.slice(0, 8)});
+        popup.close();
+      }
+    }}});
     popup = new BX.PopupWindow('derykams-fieldaudit-fill', null, {
       titleBar: data.requirements.length === 1 ? (data.requirements[0].title || data.title) : data.title,
       content: root, width: Math.min(620, window.innerWidth - 32), overlay: true,
       autoHide: false, closeByEsc: false, closeIcon: false,
       buttons: [save, cancel],
       events: {onPopupClose: function () {
+        log('popup.closed', {dealId: data.dealId});
         this.destroy(); popup = null; activeToken = null; next();
       }}
     });
     popup.show();
+    log('popup.shown', {dealId: data.dealId, challenge: data.token.slice(0, 8)});
     var first = root.querySelector('input:not(:disabled),select:not(:disabled),textarea:not(:disabled)');
     if (first) first.focus();
+  }
+
+  function ensurePopup() {
+    if (BX.PopupWindow && BX.PopupWindowButton && BX.PopupWindowButtonLink) return Promise.resolve();
+    log('popup.extension_load');
+    if (BX.Runtime && BX.Runtime.loadExtension) {
+      return BX.Runtime.loadExtension('main.popup').then(function () {
+        if (!BX.PopupWindow || !BX.PopupWindowButton || !BX.PopupWindowButtonLink) {
+          throw new Error('Расширение main.popup загружено без API PopupWindow.');
+        }
+      });
+    }
+    return Promise.reject(new Error('API окна Битрикс не загружено. Обновите страницу CRM.'));
   }
 
   function next() {
     if (activeToken || !queue.length) return;
     activeToken = queue.shift();
-    request('load', {token: activeToken}).then(show).catch(function (error) {
+    log('challenge.open', {challenge: activeToken.slice(0, 8), queued: queue.length});
+    ensurePopup().then(function () {
+      return request('load', {token: activeToken});
+    }).then(show).catch(function (error) {
+      log('popup.open_error', {challenge: (activeToken || '').slice(0, 8), message: clean(error.message)}, 'error');
+      if (popup) { popup.destroy(); popup = null; }
+      if (!BX.PopupWindow) {
+        window.alert('Не удалось открыть заполнение: ' + clean(error.message));
+        activeToken = null;
+        next();
+        return;
+      }
       var content = node('div', error.message, 'fa-runtime-error');
       var failed = new BX.PopupWindow('derykams-fieldaudit-error', null, {
         titleBar: 'Не удалось открыть заполнение', content: content, overlay: true,
@@ -190,15 +239,62 @@
     });
   }
 
-  function onResponse(response) {
-    tokens(response).forEach(function (token) {
+  function onResponse(response, config) {
+    var found = tokens(response);
+    var xhr = config && config.xhr;
+    var fromHeader = [];
+    if (xhr && typeof xhr.getResponseHeader === 'function') {
+      try {
+        fromHeader = (xhr.getResponseHeader('X-Derykams-FieldAudit') || '').split(',').map(function (value) { return value.trim(); })
+          .filter(function (value) { return /^[a-f0-9]{48}$/.test(value); });
+        fromHeader.forEach(function (token) { if (found.indexOf(token) < 0) found.push(token); });
+        // В том числе ошибка обработчика CRM до отправки onAjaxSuccess.
+        tokens(xhr.responseText, found);
+      } catch (error) {
+        log('response.read_error', {message: clean(error.message)}, 'warn');
+      }
+    }
+    var url = config && typeof config.url === 'string' ? config.url.split('?')[0] : '';
+    if (found.length || /\/crm[./]/.test(url)) {
+      log('response.received', {url: url, status: xhr && xhr.status, headerSignals: fromHeader.length,
+        challenges: found.map(function (token) { return token.slice(0, 8); })});
+    }
+    // SAVE_PROGRESS возвращает VALUE прежней стадии даже без ERROR/CHECK_ERRORS.
+    // Его штатный success-handler уже выполнился; восстанавливаем индикатор явно.
+    if (found.length && response && response.TYPE === 'DEAL' && response.VALUE && progressControls[response.ID]) {
+      var control = progressControls[response.ID];
+      delete progressControls[response.ID];
+      if (typeof control.setCurrentStepByIdAndAdjustSteps === 'function') {
+        try {
+          control.setCurrentStepByIdAndAdjustSteps(response.VALUE);
+          log('stage.restored', {dealId: response.ID, stageId: response.VALUE});
+        } catch (error) { log('stage.restore_error', {message: clean(error.message)}, 'warn'); }
+      }
+    }
+    found.forEach(function (token) {
       if (!seen[token]) { seen[token] = true; queue.push(token); }
     });
     next();
   }
 
-  BX.FieldAuditRuntime = {onResponse: onResponse};
+  BX.FieldAuditRuntime = {onResponse: onResponse, getLog: function () { return logRecords.slice(); }};
   // legacy progressbar / kanban и D7 runAction проходят через BX.ajax.
   BX.addCustomEvent('onAjaxSuccess', onResponse);
-  BX.addCustomEvent('onAjaxFailure', function (type, error) { onResponse(error); });
+  BX.addCustomEvent('onAjaxFailure', function (type, error, config) { onResponse(error, config); });
+  BX.addCustomEvent('Crm.EntityProgress.onSaveBefore', function (control, data) {
+    if (!data || data.TYPE !== 'DEAL') return;
+    progressControls[data.ID] = control;
+    log('stage.request', {dealId: data.ID, stageId: data.VALUE, source: 'progressbar'});
+  });
+  log('runtime.ready', {path: window.location.pathname, popupApi: Boolean(BX.PopupWindow), transport: 'header+message'});
+  return true;
+  }
+
+  if (!initialize()) {
+    log('runtime.waiting_for_BX', {}, 'warn');
+    document.addEventListener('DOMContentLoaded', initialize, {once: true});
+    window.addEventListener('load', function () {
+      if (!initialize()) log('runtime.init_failed', {reason: 'BX API unavailable'}, 'error');
+    }, {once: true});
+  }
 })();

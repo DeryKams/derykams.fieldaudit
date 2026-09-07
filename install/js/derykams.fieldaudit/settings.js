@@ -871,6 +871,42 @@ function renderStageCondition(rule){
     '</div>';
 }
 
+function renderFillFieldPicker(rule){
+  var selected = rule.action.fillFieldIds || [];
+  var fields = FIELD_CATALOG.filter(function(field){ return field.editable !== false; });
+  return '<div class="fa-fill-fields">' +
+    '<label>Выберите поля<input type="search" class="ui-input" data-action="search-rule-fill-fields" placeholder="Поиск по названию или ID поля" autocomplete="off"></label>' +
+    '<div class="fa-fill-fields-status" aria-live="polite">' +
+      '<span class="fa-fill-fields-count">Выбрано: ' + selected.length + '</span>' +
+      '<span class="fa-fill-fields-found">Найдено: ' + fields.length + '</span>' +
+    '</div>' +
+    '<div class="fa-fill-fields-list" role="group" aria-label="Поля для окна заполнения">' +
+      fields.map(function(field){
+        return '<label class="fa-fill-field-option" data-search="' + escapeHtml((field.name + ' ' + field.id).toLowerCase()) + '">' +
+          '<input type="checkbox" data-action="set-rule-fill-fields" data-rule-id="' + escapeHtml(rule.id) + '" value="' + escapeHtml(field.id) + '"' + (selected.indexOf(field.id) >= 0 ? ' checked' : '') + '>' +
+          '<span class="fa-fill-field-caption"><span>' + escapeHtml(field.name) + '</span><small>' + escapeHtml(field.id) + '</small></span>' +
+        '</label>';
+      }).join('') +
+      '<div class="fa-fill-fields-empty"' + (fields.length ? ' hidden' : '') + '>Поля не найдены.</div>' +
+    '</div>' +
+    '<div class="cell-hint">Отметьте нужные поля. Поиск не сбрасывает выбор.</div>' +
+  '</div>';
+}
+
+function filterFillFieldPicker(input){
+  var picker = input.closest('.fa-fill-fields');
+  if(!picker) return;
+  var terms = input.value.toLowerCase().trim().split(/\s+/).filter(Boolean);
+  var found = 0;
+  picker.querySelectorAll('.fa-fill-field-option').forEach(function(option){
+    var matches = terms.every(function(term){ return option.dataset.search.indexOf(term) >= 0; });
+    option.hidden = !matches;
+    if(matches) found++;
+  });
+  picker.querySelector('.fa-fill-fields-found').textContent = 'Найдено: ' + found;
+  picker.querySelector('.fa-fill-fields-empty').hidden = found > 0;
+}
+
 function renderRuleActionBlock(rule){
   var action = rule.action || {};
   var isBp = action.type === 'bp';
@@ -890,11 +926,7 @@ function renderRuleActionBlock(rule){
         '<label><input type="radio" name="fill-fields-source-' + rule.id + '" value="manual"' + (isManual ? ' checked' : '') + ' data-action="set-rule-fill-source" data-rule-id="' + rule.id + '"> Указать поля вручную</label>' +
       '</div>' +
       (isManual
-        ? '<label>Выберите поля<select multiple size="5" class="ui-select fa-fill-fields" data-action="set-rule-fill-fields" data-rule-id="' + rule.id + '">' +
-            FIELD_CATALOG.filter(function(field){ return field.editable !== false; }).map(function(field){
-              return optionHtml(field.id, field.name + ' — ' + field.id, selected.indexOf(field.id) >= 0, false);
-            }).join('') + '</select></label>' +
-          '<div class="cell-hint">Для выбора нескольких полей удерживайте Ctrl/Cmd.</div>'
+        ? renderFillFieldPicker(rule)
         : '<div class="cell-hint">В окно попадут поля, для которых выше задано условие «Не заполнено».</div>') +
       '<label>Заголовок окна<input class="ui-input" type="text" value="' + escapeHtml(action.fillWindowTitle || '') + '" data-action="set-rule-fill-title" data-rule-id="' + rule.id + '"></label>' +
       '<button class="ui-btn ui-btn-light ui-btn-sm" data-action="preview-rule-fill" data-rule-id="' + rule.id + '">Пример окна</button>';
@@ -2204,12 +2236,24 @@ function handleChange(event){
     refreshRules();
     return;
   }
-  if(action === 'set-rule-stage-mode' || action === 'set-rule-fill-mode' || action === 'set-rule-fill-fields'){
+  if(action === 'set-rule-fill-fields'){
+    var fillRule = findRuleById(el.dataset.ruleId);
+    if(!fillRule) return;
+    var ids = fillRule.action.fillFieldIds || [];
+    fillRule.fillFieldsSource = 'manual';
+    // Меняем только один ID: скрытые поиском выбранные поля остаются в модели.
+    fillRule.action.fillFieldIds = el.checked
+      ? (ids.indexOf(el.value) < 0 ? ids.concat(el.value) : ids)
+      : ids.filter(function(id){ return id !== el.value; });
+    el.closest('.fa-fill-fields').querySelector('.fa-fill-fields-count').textContent = 'Выбрано: ' + fillRule.action.fillFieldIds.length;
+    updateRuleSummary(fillRule.id);
+    return;
+  }
+  if(action === 'set-rule-stage-mode' || action === 'set-rule-fill-mode'){
     var editedRule = findRuleById(el.dataset.ruleId);
     if(!editedRule) return;
     if(action === 'set-rule-stage-mode') editedRule.stageMode = el.value;
     if(action === 'set-rule-fill-mode') editedRule.action.fillMode = el.value;
-    if(action === 'set-rule-fill-fields') editedRule.action.fillFieldIds = Array.from(el.selectedOptions).map(function(option){ return option.value; }).filter(Boolean);
     refreshRules();
     return;
   }
@@ -2281,6 +2325,11 @@ function handleInput(event){
   var el = event.target;
   var action = el.dataset.action;
   if(!action) return;
+
+  if(action === 'search-rule-fill-fields'){
+    filterFillFieldPicker(el);
+    return;
+  }
 
   if(action === 'set-rule-fill-title'){
     var titleRule = findRuleById(el.dataset.ruleId);

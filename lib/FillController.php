@@ -19,6 +19,7 @@ final class FillController extends Controller
 
 	public function loadAction(string $token): ?array
 	{
+		Diagnostics::write('popup.load.begin', ['challenge' => Diagnostics::tokenId($token)]);
 		try
 		{
 			$challenge = $this->getAllowedChallenge($token);
@@ -35,6 +36,9 @@ final class FillController extends Controller
 					$fields[$id] = $field;
 				}
 			}
+			Diagnostics::write('popup.load.ready', ['challenge' => Diagnostics::tokenId($token),
+				'dealId' => $challenge['dealId'], 'fieldIds' => array_keys($fields),
+				'requirements' => $challenge['requirements']]);
 			return [
 				'token' => $token, 'dealId' => $challenge['dealId'],
 				'title' => 'Заполнение полей сделки', 'requirements' => $challenge['requirements'],
@@ -44,12 +48,14 @@ final class FillController extends Controller
 		catch (\Throwable $e)
 		{
 			$this->addError(new Error($e->getMessage(), 'FIELDAUDIT_LOAD'));
+			Diagnostics::write('popup.load.error', ['challenge' => Diagnostics::tokenId($token), 'message' => $e->getMessage()]);
 			return null;
 		}
 	}
 
 	public function saveAction(string $token, string $valuesJson = '{}'): ?array
 	{
+		Diagnostics::write('popup.save.begin', ['challenge' => Diagnostics::tokenId($token)]);
 		try
 		{
 			$challenge = $this->getAllowedChallenge($token);
@@ -106,11 +112,15 @@ final class FillController extends Controller
 				throw new \RuntimeException($deal->LAST_ERROR ?: 'Сделка не сохранена.');
 			}
 			FillChallenge::forget($token);
+			Diagnostics::write('popup.save.done', ['challenge' => Diagnostics::tokenId($token),
+				'dealId' => $challenge['dealId'], 'stageId' => $changes['STAGE_ID'] ?? $before['STAGE_ID']]);
 			return ['saved' => true, 'dealId' => $challenge['dealId'], 'stageId' => $changes['STAGE_ID'] ?? $before['STAGE_ID']];
 		}
 		catch (\Throwable $e)
 		{
 			$this->addError(new Error($e->getMessage(), 'FIELDAUDIT_SAVE'));
+			Diagnostics::write('popup.save.error', ['challenge' => Diagnostics::tokenId($token),
+				'message' => preg_replace('/\[DERYKAMS_FIELDAUDIT:[a-f0-9]{48}\]/', '[challenge]', $e->getMessage())]);
 			return null;
 		}
 	}

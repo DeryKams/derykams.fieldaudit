@@ -38,8 +38,12 @@ final class RuleHandler
 	{
 		$id = (int)($arFields['ID'] ?? 0);
 		$rules = Options::get()['rules'] ?? [];
-		if ($id <= 0 || !is_array($rules) || $rules === []) return true;
-		if (!array_filter($rules, static fn ($rule) => is_array($rule) && ($rule['enabled'] ?? false))) return true;
+		if ($id <= 0) return true;
+		if (!is_array($rules) || $rules === [] || !array_filter($rules, static fn ($rule) => is_array($rule) && ($rule['enabled'] ?? false)))
+		{
+			Diagnostics::write('rules.allow', ['dealId' => $id, 'reason' => 'no_enabled_rules']);
+			return true;
+		}
 		unset(self::$snapshots[$id]);
 
 		try
@@ -47,10 +51,15 @@ final class RuleHandler
 			$before = DealState::load($id);
 			$states = DealState::states($before, $arFields);
 			$context = DealState::context($before, $arFields);
-			$requirements = RuleEngine::getFillRequirements($rules, $states, $context);
+			Diagnostics::write('rules.begin', ['dealId' => $id] + $context);
+			$requirements = RuleEngine::getFillRequirements($rules, $states, $context,
+				static function (string $event, array $data) use ($id): void {
+					Diagnostics::write($event, ['dealId' => $id] + $data);
+				});
 			if ($requirements === [])
 			{
 				self::$snapshots[$id] = ['states' => $states, 'context' => $context];
+				Diagnostics::write('rules.allow', ['dealId' => $id, 'reason' => 'no_unmet_requirements']);
 				return true;
 			}
 
@@ -61,14 +70,17 @@ final class RuleHandler
 				$messages[] = self::buildFillMessage($prefix, $requirement['fieldIds']);
 			}
 			$token = FillChallenge::create($id, $before, $arFields, $requirements);
+			Integration::publishChallenge($token);
 			$arFields['RESULT_MESSAGE'] = implode('; ', $messages)
 				. ($token !== '' ? ' [DERYKAMS_FIELDAUDIT:' . $token . ']' : '');
-			self::log('onBefore: BLOCK id=' . $id . ' rules=' . count($requirements));
+			Diagnostics::write('rules.block', ['dealId' => $id, 'requirements' => $requirements,
+				'challenge' => Diagnostics::tokenId($token), 'popupAvailable' => $token !== '']);
 			return false;
 		}
 		catch (\Throwable $e)
 		{
 			self::log('onBefore: exception ' . $e->getMessage() . ' id=' . $id);
+			Diagnostics::write('rules.error', ['dealId' => $id, 'exception' => get_class($e), 'message' => $e->getMessage()]);
 			$arFields['RESULT_MESSAGE'] = 'Не удалось проверить правила заполнения. Повторите сохранение или обратитесь к администратору.';
 			return false;
 		}

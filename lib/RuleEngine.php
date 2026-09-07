@@ -31,38 +31,50 @@ final class RuleEngine
 	 * @param array $context контекст операции: ['stageId' => новая стадия сделки]
 	 * @return array[] [{rule, action: {type,bpId,fillWindowTitle}, activeLeafFieldIds:[fieldId,...]}]
 	 */
-	public static function evaluateRules(array $rules, array $states, array $context = []): array
+	public static function evaluateRules(array $rules, array $states, array $context = [], ?callable $trace = null): array
 	{
 		$triggered = [];
 
 		foreach ($rules as $rule)
 		{
+			$report = static function (string $event, array $data) use ($trace, $rule): void {
+				if ($trace) $trace($event, ['ruleId' => is_array($rule) ? ($rule['id'] ?? '') : ''] + $data);
+			};
 			if (!is_array($rule) || ($rule['enabled'] ?? false) === false)
 			{
+				$report('rule.skip', ['reason' => 'disabled_or_invalid']);
 				continue;
 			}
 
 			/* Гейт по целевой стадии: действие срабатывает только если
 			   сделка переходит на указанную стадию (STAGE_ID нового значения). */
 			$targetStageId = (string)($rule['stageId'] ?? '');
+			$report('rule.stage', [
+				'targetStageId' => $targetStageId, 'stageMode' => $rule['stageMode'] ?? 'changed_to',
+				'previousStageId' => $context['previousStageId'] ?? '', 'stageId' => $context['stageId'] ?? '',
+			]);
 			if ($targetStageId !== '' && (string)($context['stageId'] ?? '') !== $targetStageId)
 			{
+				$report('rule.skip', ['reason' => 'target_stage_mismatch']);
 				continue;
 			}
 
 			if ($targetStageId !== '' && ($rule['stageMode'] ?? 'changed_to') === 'changed_to'
 				&& (string)($context['previousStageId'] ?? '') === $targetStageId)
 			{
+				$report('rule.skip', ['reason' => 'stage_not_changed']);
 				continue;
 			}
 
 			$condition = $rule['condition'] ?? null;
 			if (!is_array($condition))
 			{
+				$report('rule.skip', ['reason' => 'invalid_condition']);
 				continue;
 			}
 
-			$result = self::evaluateNode($condition, $states);
+			$result = self::evaluateNode($condition, $states, $trace ? $report : null);
+			$report('rule.condition', ['result' => $result['ok']]);
 			if (!$result['ok'])
 			{
 				continue;
@@ -73,6 +85,7 @@ final class RuleEngine
 			$action = self::resolveAction($rule, $result['activeLeaves']);
 			if ($action === null)
 			{
+				$report('rule.skip', ['reason' => 'no_action']);
 				continue;
 			}
 
@@ -132,10 +145,10 @@ final class RuleEngine
 	}
 
 	/** Только невыполненные требования сработавших правил; без правил всегда []. */
-	public static function getFillRequirements(array $rules, array $states, array $context = []): array
+	public static function getFillRequirements(array $rules, array $states, array $context = [], ?callable $trace = null): array
 	{
 		$requirements = [];
-		foreach (self::evaluateRules($rules, $states, $context) as $item)
+		foreach (self::evaluateRules($rules, $states, $context, $trace) as $item)
 		{
 			if ($item['action']['type'] !== 'fill') continue;
 			$rule = $item['rule'];
@@ -145,7 +158,9 @@ final class RuleEngine
 				'fieldIds' => self::fillFieldIds($rule),
 				'mode' => ($rule['action']['fillMode'] ?? 'all') === 'any' ? 'any' : 'all',
 			];
-			if (!self::requirementSatisfied($requirement, $states)) $requirements[] = $requirement;
+			$satisfied = self::requirementSatisfied($requirement, $states);
+			if ($trace) $trace('rule.fill_requirement', $requirement + ['satisfied' => $satisfied]);
+			if (!$satisfied) $requirements[] = $requirement;
 		}
 		return $requirements;
 	}
@@ -188,13 +203,26 @@ final class RuleEngine
 	/**
 	 * Рекурсивная оценка узла. Возвращает ok и активные листья истинной ветки.
 	 */
-	private static function evaluateNode(array $node, array $states): array
+	private static function evaluateNode(array $node, array $states, ?callable $trace = null, string $path = 'condition'): array
 	{
 		$type = (string)($node['type'] ?? '');
 
 		if ($type === 'field')
 		{
 			$ok = self::checkLeaf($node, $states);
+			if ($trace)
+			{
+				$id = (string)($node['fieldId'] ?? '');
+				$state = $states[$id] ?? [];
+				$trace('condition.field', [
+					'path' => $path, 'fieldId' => $id, 'operator' => $node['operator'] ?? '',
+					'stateAvailable' => isset($states[$id]),
+					'previousFilled' => self::isFilled($state['prev'] ?? null),
+					'currentFilled' => self::isFilled($state['curr'] ?? null),
+					'changed' => self::toComparableString($state['prev'] ?? null) !== self::toComparableString($state['curr'] ?? null),
+					'result' => $ok,
+				]);
+			}
 			return ['ok' => $ok, 'activeLeaves' => $ok ? [$node] : []];
 		}
 
@@ -214,7 +242,7 @@ final class RuleEngine
 		$activeLeaves = [];
 		$any = false;
 
-		foreach ($children as $child)
+		foreach ($children as $index => $child)
 		{
 			if (!is_array($child))
 			{
@@ -226,7 +254,7 @@ final class RuleEngine
 				continue;
 			}
 
-			$childResult = self::evaluateNode($child, $states);
+			$childResult = self::evaluateNode($child, $states, $trace, $path . '.children.' . $index);
 			if ($childResult['ok'])
 			{
 				$any = true;
@@ -234,12 +262,14 @@ final class RuleEngine
 			}
 			elseif ($isAnd)
 			{
+				if ($trace) $trace('condition.group', ['path' => $path, 'logic' => $logic, 'result' => false, 'shortCircuitAt' => $index]);
 				return ['ok' => false, 'activeLeaves' => []];
 			}
 		}
 
 		/* И: дошли до конца — все дети истинны.
 		   ИЛИ: дошли до конца — ни один ребёнок не истинен. */
+		if ($trace) $trace('condition.group', ['path' => $path, 'logic' => $logic, 'result' => $isAnd || $any]);
 		return ['ok' => $isAnd || $any, 'activeLeaves' => $activeLeaves];
 	}
 

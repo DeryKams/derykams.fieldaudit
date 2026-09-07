@@ -7,6 +7,24 @@ use Bitrix\Main\Page\Asset;
 
 final class Integration
 {
+	public const CHALLENGE_HEADER = 'X-Derykams-FieldAudit';
+	private static array $responseTokens = [];
+
+	/** Legacy SAVE_PROGRESS теряет RESULT_MESSAGE, поэтому сигнал передаётся также заголовком. */
+	public static function publishChallenge(string $token): void
+	{
+		if ($token === '') return;
+		if (headers_sent())
+		{
+			Diagnostics::write('challenge.header_failed', ['reason' => 'headers_sent', 'challenge' => Diagnostics::tokenId($token)]);
+			return;
+		}
+		self::$responseTokens[$token] = $token;
+		// Последние 20 соответствуют лимиту контекстов в сессии (в том числе массовый перенос).
+		header(self::CHALLENGE_HEADER . ': ' . implode(',', array_slice(self::$responseTokens, -20)));
+		Diagnostics::write('challenge.header_sent', ['challenge' => Diagnostics::tokenId($token)]);
+	}
+
 	/** Обновление существующей установки при открытии настроек администратором. */
 	public static function sync(): void
 	{
@@ -33,6 +51,7 @@ final class Integration
 		if (!preg_match('~/crm/deal/(?:details|kanban)/~', $path)) return;
 		// Скрипт слушает только ответы с маркером модуля. При отсутствии правил не вмешивается.
 		\CJSCore::Init(['ajax', 'popup']);
+		Diagnostics::write('runtime.assets', ['files' => ['runtime.js', 'runtime.css']]);
 		$base = '/bitrix/js/derykams.fieldaudit/';
 		foreach (['runtime.js', 'runtime.css'] as $name)
 		{

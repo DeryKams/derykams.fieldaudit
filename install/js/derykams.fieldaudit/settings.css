@@ -821,7 +821,17 @@
 .fa-root .rule-action-params label { display: grid; gap: 7px; font-weight: 600; }
 .fa-root .fill-fields-source { display: flex; flex-wrap: wrap; gap: 12px 24px; }
 .fa-root .fill-fields-source label { display: flex; align-items: center; gap: 8px; cursor: pointer; }
-.fa-root .fa-fill-fields { height: auto; min-height: 140px; }
+.fa-root .fa-fill-fields { display: grid; gap: 8px; min-width: 0; }
+.fa-root .fa-fill-fields-status { display: flex; flex-wrap: wrap; gap: 8px 20px; color: var(--muted); font-size: 12px; }
+.fa-root .fa-fill-fields-list { max-height: 300px; overflow-y: auto; border: 1px solid var(--border); border-radius: 6px; background: #fff; }
+.fa-root .rule-action-params .fa-fill-field-option { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; cursor: pointer; border-bottom: 1px solid var(--border); }
+.fa-root .fa-fill-field-option:last-of-type { border-bottom: 0; }
+.fa-root .fa-fill-field-option:hover, .fa-root .fa-fill-field-option:focus-within { background: var(--blue-light); }
+.fa-root .fa-fill-field-option input { flex: 0 0 auto; margin: 3px 0 0; width: 16px; height: 16px; }
+.fa-root .fa-fill-field-caption { display: grid; gap: 3px; min-width: 0; overflow-wrap: anywhere; }
+.fa-root .fa-fill-field-caption small { color: var(--muted); font-weight: 400; }
+.fa-root .fa-fill-fields-empty { padding: 16px; color: var(--muted); text-align: center; }
+.fa-root .fa-fill-field-option[hidden], .fa-root .fa-fill-fields-empty[hidden] { display: none; }
 .fa-root .rule-action-params .ui-btn { justify-self: start; }
 .fa-root .sim-stage-controls { margin: 16px 0; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .fa-root .sim-stage-controls label { display: grid; gap: 6px; }
