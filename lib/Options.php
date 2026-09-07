@@ -51,6 +51,14 @@ final class Options
 		self::$cache = $data;
 	}
 
+	public static function saveRules(array $rules): void
+	{
+		RuleConfig::validate($rules);
+		$config = self::get();
+		$config['rules'] = array_values($rules);
+		self::set($config);
+	}
+
 	public static function clear(): void
 	{
 		Option::delete(self::MODULE_ID, ['name' => self::OPT_KEY]);

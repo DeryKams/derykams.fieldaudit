@@ -37,6 +37,22 @@ if ($APPLICATION->GetGroupRight('derykams.fieldaudit') < 'W')
 	$APPLICATION->AuthForm(Loc::getMessage('DERYKAMS_FA_ACCESS_DENIED'));
 }
 
+if (!Loader::includeModule('crm'))
+{
+	throw new \RuntimeException('Для настроек контроля полей требуется модуль CRM.');
+}
+
+/* Обновляем ассеты и подключение к CRM также для ранее установленного модуля. */
+$integrationError = '';
+try
+{
+	\Derykams\FieldAudit\Integration::sync();
+}
+catch (\Throwable $e)
+{
+	$integrationError = $e->getMessage();
+}
+
 /* --- Обработка сохранения: POST config_json --- */
 $request = \Bitrix\Main\Application::getInstance()->getContext()->getRequest();
 $saved = ((string)$request->getQuery('saved') === '1');
@@ -52,7 +68,7 @@ if ($request->isPost() && check_bitrix_sessid())
 			$decoded = \Bitrix\Main\Web\Json::decode($json);
 			if (is_array($decoded) && array_key_exists('rules', $decoded) && is_array($decoded['rules']))
 			{
-				\Derykams\FieldAudit\Options::set(['rules' => $decoded['rules']]);
+				\Derykams\FieldAudit\Options::saveRules($decoded['rules']);
 
 				/* PRG: редирект, чтобы F5 не отправлял форму повторно */
 				LocalRedirect($APPLICATION->GetCurPageParam('saved=1', ['saved']));
@@ -77,54 +93,7 @@ if ($request->isPost() && check_bitrix_sessid())
  */
 function derykamsFieldauditCollectFieldCatalog(): array
 {
-	$fields = [
-		[
-			'id' => 'TITLE',
-			'name' => Loc::getMessage('DERYKAMS_FA_FIELD_TITLE'),
-			'type' => 'string',
-			'entity' => Loc::getMessage('DERYKAMS_FA_ENTITY_DEAL'),
-		],
-		[
-			'id' => 'COMMENTS',
-			'name' => Loc::getMessage('DERYKAMS_FA_FIELD_COMMENTS'),
-			'type' => 'string',
-			'entity' => Loc::getMessage('DERYKAMS_FA_ENTITY_DEAL'),
-		],
-	];
-
-	$userFields = $GLOBALS['USER_FIELD_MANAGER']->GetUserFields('CRM_DEAL', 0, LANGUAGE_ID);
-	foreach ($userFields as $field)
-	{
-		$field = (array)$field;
-		$fieldName = (string)($field['FIELD_NAME'] ?? '');
-		if ($fieldName === '' || $fieldName === 'UF_CRM_DELIVERY_SERVICE')
-		{
-			continue;
-		}
-
-		$type = ($field['USER_TYPE_ID'] ?? '') === 'file' ? 'file' : 'string';
-
-		/* Название: EDIT_FORM_LABEL -> LIST_COLUMN_LABEL -> LIST_FILTER_LABEL -> FIELD_NAME.
-		   Лейблы появляются только если GetUserFields вызван с $LANG (JOIN b_user_field_lang). */
-		$label = (string)($field['EDIT_FORM_LABEL'] ?? '');
-		if ($label === '')
-		{
-			$label = (string)($field['LIST_COLUMN_LABEL'] ?? '');
-		}
-		if ($label === '')
-		{
-			$label = (string)($field['LIST_FILTER_LABEL'] ?? '');
-		}
-
-		$fields[] = [
-			'id' => $fieldName,
-			'name' => trim($label) !== '' ? trim($label) : $fieldName,
-			'type' => $type,
-			'entity' => Loc::getMessage('DERYKAMS_FA_ENTITY_DEAL'),
-		];
-	}
-
-	return $fields;
+	return array_values(\Derykams\FieldAudit\FieldCatalog::get());
 }
 
 /**
@@ -165,32 +134,14 @@ function derykamsFieldauditCollectWorkflowCatalog(): array
 function derykamsFieldauditCollectStageCatalog(): array
 {
 	$stages = [];
-
-	try
+	foreach (\Bitrix\Crm\Category\DealCategory::getAll(true) as $category)
 	{
-		$rows = \CCrmStatus::GetList(
-			['SORT' => 'ASC', 'ID' => 'ASC'],
-			['ENTITY_ID' => 'DEAL_STAGE', 'ACTIVE' => 'Y', 'CHECK_PERMISSIONS' => 'N']
-		);
-		while ($row = $rows->Fetch())
+		$categoryId = (int)$category['ID'];
+		foreach (\Bitrix\Crm\Category\DealCategory::getStageList($categoryId) as $id => $name)
 		{
-			$statusId = (string)($row['STATUS_ID'] ?? '');
-			if ($statusId === '')
-			{
-				continue;
-			}
-
-			$stages[] = [
-				'id' => $statusId,
-				'name' => trim((string)($row['NAME'] ?? '')) ?: $statusId,
-				'category' => (int)($row['CATEGORY_ID'] ?? 0),
-			];
+			$stages[] = ['id' => (string)$id, 'name' => (string)$name, 'category' => $categoryId, 'categoryName' => (string)$category['NAME']];
 		}
 	}
-	catch (\Throwable)
-	{
-	}
-
 	return $stages;
 }
 
@@ -202,12 +153,13 @@ $faConfig = [
 ];
 
 $faAssetsPath = '/bitrix/js/derykams.fieldaudit/';
+$faAssetsVersion = max(filemtime(__DIR__ . '/../install/js/derykams.fieldaudit/settings.js'), filemtime(__DIR__ . '/../install/js/derykams.fieldaudit/settings.css'));
 
 /* Заголовок страницы в шапке админки */
 $APPLICATION->SetTitle(Loc::getMessage('DERYKAMS_FA_PAGE_TITLE'));
 
 /* CSS примера (отскоуплен под .fa-root) в <head> */
-$APPLICATION->SetAdditionalCSS($faAssetsPath . 'settings.css');
+$APPLICATION->SetAdditionalCSS($faAssetsPath . 'settings.css?v=' . $faAssetsVersion);
 
 /* BX нужен для settings.js: BX.ready + BX.message('bitrix_sessid') */
 \Bitrix\Main\UI\Extension::load(['main.core']);
@@ -218,6 +170,10 @@ require($_SERVER['DOCUMENT_ROOT'] . '/bitrix/modules/main/include/prolog_admin_a
 if ($saved)
 {
 	\CAdminMessage::ShowMessage(['MESSAGE' => Loc::getMessage('DERYKAMS_FA_SAVED'), 'TYPE' => 'OK']);
+}
+if ($integrationError !== '')
+{
+	\CAdminMessage::ShowMessage(['MESSAGE' => $integrationError, 'TYPE' => 'ERROR']);
 }
 if ($error !== '')
 {
@@ -263,7 +219,7 @@ if ($error !== '')
 <script>
 window.faConfig = <?= \Bitrix\Main\Web\Json::encode($faConfig, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP) ?>;
 </script>
-<script src="<?= $faAssetsPath ?>settings.js"></script>
+<script src="<?= $faAssetsPath ?>settings.js?v=<?= $faAssetsVersion ?>"></script>
 
 <?php
 require($_SERVER['DOCUMENT_ROOT'] . '/bitrix/modules/main/include/epilog_admin.php');

@@ -2,6 +2,8 @@
 
 namespace Derykams\FieldAudit;
 
+use Bitrix\Main\Web\Json;
+
 /**
  * Движок правил: оценивает дерево условий правила над значениями полей
  * и возвращает действие правила из истинной ветки.
@@ -48,6 +50,12 @@ final class RuleEngine
 				continue;
 			}
 
+			if ($targetStageId !== '' && ($rule['stageMode'] ?? 'changed_to') === 'changed_to'
+				&& (string)($context['previousStageId'] ?? '') === $targetStageId)
+			{
+				continue;
+			}
+
 			$condition = $rule['condition'] ?? null;
 			if (!is_array($condition))
 			{
@@ -76,11 +84,70 @@ final class RuleEngine
 			$triggered[] = [
 				'rule' => $rule,
 				'action' => $action,
-				'activeLeafFieldIds' => array_values(array_filter($activeLeafFieldIds)),
+				'activeLeafFieldIds' => array_values(array_unique(array_filter($activeLeafFieldIds))),
 			];
 		}
 
 		return $triggered;
+	}
+
+	/** Поля действия задаются отдельно от условия. Пустой список — поля «Не заполнено» условия. */
+	public static function fillFieldIds(array $rule): array
+	{
+		$explicit = $rule['action']['fillFieldIds'] ?? [];
+		if (is_array($explicit) && $explicit !== [])
+		{
+			return array_values(array_unique(array_filter($explicit, 'is_string')));
+		}
+		$ids = [];
+		$walk = static function (array $node) use (&$walk, &$ids): void {
+			if (($node['type'] ?? '') === 'field' && ($node['operator'] ?? '') === 'not_filled')
+			{
+				$ids[] = (string)($node['fieldId'] ?? '');
+			}
+			foreach (($node['children'] ?? []) as $child)
+			{
+				if (is_array($child)) $walk($child);
+			}
+		};
+		$walk($rule['condition'] ?? []);
+		return array_values(array_unique(array_filter($ids)));
+	}
+
+	public static function isFilled(mixed $value): bool
+	{
+		return self::toComparableString($value) !== '';
+	}
+
+	public static function requirementSatisfied(array $requirement, array $states): bool
+	{
+		$ids = $requirement['fieldIds'] ?? [];
+		if ($ids === []) return true;
+		$filled = 0;
+		foreach ($ids as $id)
+		{
+			if (self::isFilled($states[$id]['curr'] ?? null)) ++$filled;
+		}
+		return ($requirement['mode'] ?? 'all') === 'any' ? $filled > 0 : $filled === count($ids);
+	}
+
+	/** Только невыполненные требования сработавших правил; без правил всегда []. */
+	public static function getFillRequirements(array $rules, array $states, array $context = []): array
+	{
+		$requirements = [];
+		foreach (self::evaluateRules($rules, $states, $context) as $item)
+		{
+			if ($item['action']['type'] !== 'fill') continue;
+			$rule = $item['rule'];
+			$requirement = [
+				'ruleId' => (string)($rule['id'] ?? ''),
+				'title' => $item['action']['fillWindowTitle'] ?: (string)($rule['title'] ?? ''),
+				'fieldIds' => self::fillFieldIds($rule),
+				'mode' => ($rule['action']['fillMode'] ?? 'all') === 'any' ? 'any' : 'all',
+			];
+			if (!self::requirementSatisfied($requirement, $states)) $requirements[] = $requirement;
+		}
+		return $requirements;
 	}
 
 	/**
@@ -145,6 +212,7 @@ final class RuleEngine
 		$logic = (string)($node['logic'] ?? 'and');
 		$isAnd = ($logic !== 'or');
 		$activeLeaves = [];
+		$any = false;
 
 		foreach ($children as $child)
 		{
@@ -161,13 +229,7 @@ final class RuleEngine
 			$childResult = self::evaluateNode($child, $states);
 			if ($childResult['ok'])
 			{
-				/* ИЛИ: первая же истина — можно не считать дальше,
-				   И: копим активные листья, пока все дети истинны. */
-				if (!$isAnd)
-				{
-					return ['ok' => true, 'activeLeaves' => $childResult['activeLeaves']];
-				}
-
+				$any = true;
 				$activeLeaves = array_merge($activeLeaves, $childResult['activeLeaves']);
 			}
 			elseif ($isAnd)
@@ -178,7 +240,7 @@ final class RuleEngine
 
 		/* И: дошли до конца — все дети истинны.
 		   ИЛИ: дошли до конца — ни один ребёнок не истинен. */
-		return ['ok' => $isAnd, 'activeLeaves' => $isAnd ? $activeLeaves : []];
+		return ['ok' => $isAnd || $any, 'activeLeaves' => $activeLeaves];
 	}
 
 	/**

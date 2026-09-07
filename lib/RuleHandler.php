@@ -31,67 +31,47 @@ final class RuleHandler
 	private const UF_ENTITY = 'CRM_DEAL';
 	private const LOG_FILE = '/upload/derykams.fieldaudit.log';
 
-	/**
-	 * OnBeforeCrmDealUpdate: блокирует сохранение, если fill-правило сработало.
-	 *
-	 * @param array $arFields поля операции (по ссылке; ядро читает RESULT_MESSAGE)
-	 * @return bool false = отменить сохранение
-	 */
+	/** Предыдущие значения сохраняются до записи, в том числе для БП после записи. */
+	private static array $snapshots = [];
+
 	public static function onBeforeDealUpdate(array &$arFields): bool
 	{
 		$id = (int)($arFields['ID'] ?? 0);
-		if ($id <= 0)
-		{
-			self::log('onBefore: pass (no ID in payload)');
-			return true;
-		}
+		$rules = Options::get()['rules'] ?? [];
+		if ($id <= 0 || !is_array($rules) || $rules === []) return true;
+		if (!array_filter($rules, static fn ($rule) => is_array($rule) && ($rule['enabled'] ?? false))) return true;
+		unset(self::$snapshots[$id]);
 
 		try
 		{
-			$rules = Options::get()['rules'] ?? [];
-			if (!is_array($rules) || $rules === [])
+			$before = DealState::load($id);
+			$states = DealState::states($before, $arFields);
+			$context = DealState::context($before, $arFields);
+			$requirements = RuleEngine::getFillRequirements($rules, $states, $context);
+			if ($requirements === [])
 			{
-				self::log("onBefore: pass (no rules) id=$id");
+				self::$snapshots[$id] = ['states' => $states, 'context' => $context];
 				return true;
 			}
 
-			$states = self::collectStates($id, $arFields);
-			$context = self::buildContext($id, $arFields);
-			$triggered = RuleEngine::evaluateRules($rules, $states, $context);
+			$messages = [];
+			foreach ($requirements as $requirement)
+			{
+				$prefix = $requirement['mode'] === 'any' ? 'Заполните хотя бы одно поле' : 'Заполните все поля';
+				$messages[] = self::buildFillMessage($prefix, $requirement['fieldIds']);
+			}
+			$token = FillChallenge::create($id, $before, $arFields, $requirements);
+			$arFields['RESULT_MESSAGE'] = implode('; ', $messages)
+				. ($token !== '' ? ' [DERYKAMS_FIELDAUDIT:' . $token . ']' : '');
+			self::log('onBefore: BLOCK id=' . $id . ' rules=' . count($requirements));
+			return false;
 		}
 		catch (\Throwable $e)
 		{
-			self::log('onBefore: pass (exception ' . $e->getMessage() . ') id=' . $id);
-			return true;
-		}
-
-		$fillTotal = 0;
-		foreach ($triggered as $item)
-		{
-			$action = $item['action'] ?? [];
-			if (($action['type'] ?? '') !== 'fill')
-			{
-				continue;
-			}
-
-			$fillFieldIds = $item['activeLeafFieldIds'] ?? [];
-			$fillTotal += count($fillFieldIds);
-			if ($fillFieldIds === [])
-			{
-				continue;
-			}
-
-			$arFields['RESULT_MESSAGE'] = self::buildFillMessage(
-				(string)($action['fillWindowTitle'] ?? ''),
-				$fillFieldIds
-			);
-
-			self::log('onBefore: BLOCK id=' . $id . ' fields=' . implode(',', $fillFieldIds));
+			self::log('onBefore: exception ' . $e->getMessage() . ' id=' . $id);
+			$arFields['RESULT_MESSAGE'] = 'Не удалось проверить правила заполнения. Повторите сохранение или обратитесь к администратору.';
 			return false;
 		}
-
-		self::log("onBefore: pass (triggered=" . count($triggered) . ", fillLeaves=$fillTotal) id=$id");
-		return true;
 	}
 
 	/**
@@ -113,8 +93,11 @@ final class RuleHandler
 				return true;
 			}
 
-			$states = self::collectStates($id, $arFields);
-			$context = self::buildContext($id, $arFields);
+			$snapshot = self::$snapshots[$id] ?? null;
+			unset(self::$snapshots[$id]);
+			if ($snapshot === null) return true;
+			$states = $snapshot['states'];
+			$context = $snapshot['context'];
 			$triggered = RuleEngine::evaluateRules($rules, $states, $context);
 
 			$launched = [];
@@ -203,95 +186,6 @@ final class RuleHandler
 		}
 
 		return true;
-	}
-
-	/**
-	 * Собирает prev/curr по полям, участвующим в правилах.
-	 */
-	private static function collectStates(int $id, array $arFields): array
-	{
-		$fieldIds = self::ruleFieldIds();
-		if ($fieldIds === [])
-		{
-			return [];
-		}
-
-		$dbResult = \CCrmDeal::GetListEx(
-			[],
-			['ID' => $id, 'CHECK_PERMISSIONS' => 'N'],
-			false,
-			false,
-			['*', 'UF_*']
-		);
-		$current = $dbResult->Fetch();
-		if (!is_array($current))
-		{
-			return [];
-		}
-
-		$states = [];
-		foreach ($fieldIds as $fieldId)
-		{
-			$prev = $current[$fieldId] ?? '';
-			$curr = array_key_exists($fieldId, $arFields)
-				? $arFields[$fieldId]
-				: ($current[$fieldId] ?? '');
-
-			$states[$fieldId] = ['prev' => $prev, 'curr' => $curr];
-		}
-
-		return $states;
-	}
-
-	/**
-	 * Уникальные fieldId из всех условий всех правил.
-	 */
-	private static function ruleFieldIds(): array
-	{
-		$fieldIds = [];
-
-		$walk = static function (array $node) use (&$walk, &$fieldIds): void
-		{
-			if (($node['type'] ?? '') === 'field')
-			{
-				$fieldId = (string)($node['fieldId'] ?? '');
-				if ($fieldId !== '' && !in_array($fieldId, $fieldIds, true))
-				{
-					$fieldIds[] = $fieldId;
-				}
-
-				return;
-			}
-
-			foreach (($node['children'] ?? []) as $child)
-			{
-				if (is_array($child))
-				{
-					$walk($child);
-				}
-			}
-		};
-
-		foreach ((Options::get()['rules'] ?? []) as $rule)
-		{
-			if (is_array($rule) && is_array($rule['condition'] ?? null))
-			{
-				$walk($rule['condition']);
-			}
-		}
-
-		return $fieldIds;
-	}
-
-	/**
-	 * Контекст операции для движка: текущая (новая) стадия сделки.
-	 * STAGE_ID берём из compatible-пейлоада (поле входит в getCompatibleData).
-	 */
-	private static function buildContext(int $id, array $arFields): array
-	{
-		return [
-			'stageId' => (string)($arFields['STAGE_ID'] ?? ''),
-		];
 	}
 
 	/**

@@ -65,7 +65,15 @@ class SettingsController extends Controller
 			return null;
 		}
 
-		Options::set(['rules' => $config['rules']]);
+		try
+		{
+			Options::saveRules($config['rules']);
+		}
+		catch (\InvalidArgumentException $e)
+		{
+			$this->addError(new Error($e->getMessage(), 'schema'));
+			return null;
+		}
 
 		return ['status' => 'success'];
 	}

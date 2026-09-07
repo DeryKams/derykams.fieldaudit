@@ -49,7 +49,7 @@ class derykams_fieldaudit extends CModule
 		$this->MODULE_ID = self::MODULE_ID;
 
 		$arModuleVersion = [];
-		include __DIR__ . '/version.php';
+		include __DIR__ . '/../version.php';
 
 		$this->MODULE_VERSION = $arModuleVersion['VERSION'] ?? '0.1.0';
 		$this->MODULE_VERSION_DATE = $arModuleVersion['VERSION_DATE'] ?? '2026-09-07 00:00:00';
@@ -193,6 +193,7 @@ class derykams_fieldaudit extends CModule
 	public function InstallEvents()
 	{
 		$em = EventManager::getInstance();
+		$em->registerEventHandler('main', 'OnProlog', $this->MODULE_ID, 'Derykams\\FieldAudit\\Integration', 'onProlog');
 
 		// смарт-процессы: общий обработчик на все SP
 		$em->registerEventHandler(
@@ -215,6 +216,7 @@ class derykams_fieldaudit extends CModule
 	public function UnInstallEvents()
 	{
 		$em = EventManager::getInstance();
+		$em->unRegisterEventHandler('main', 'OnProlog', $this->MODULE_ID, 'Derykams\\FieldAudit\\Integration', 'onProlog');
 
 		$em->unRegisterEventHandler(
 			'crm',

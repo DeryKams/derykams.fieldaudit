@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="ru"><meta charset="utf-8"><title>Field audit UI regression</title>
+<link rel="stylesheet" href="../install/js/derykams.fieldaudit/settings.css">
+<link rel="stylesheet" href="../install/js/derykams.fieldaudit/runtime.css">
+<body>
+<pre id="test-result">RUNNING</pre>
+<div class="fa-root"><div class="app">
+  <button data-action="add-rule">Добавить правило</button><button data-action="save-settings">Сохранить</button>
+  <nav class="tabs">
+    <button class="tab" data-action="switch-tab" data-tab="rules">Правила</button>
+    <button class="tab" data-action="switch-tab" data-tab="simulator">Симуляция</button>
+    <button class="tab" data-action="switch-tab" data-tab="json">JSON</button>
+  </nav>
+  <section class="tab-panel" id="tab-analysis"></section><section class="tab-panel" id="tab-rules"></section>
+  <section class="tab-panel" id="tab-simulator"></section><section class="tab-panel" id="tab-json"></section>
+  <div id="modalRoot"></div><div id="toastContainer"></div>
+</div></div>
+<script>
+window.errors = [];
+window.addEventListener('error', function (e) { errors.push(e.message); });
+window.addEventListener('unhandledrejection', function (e) { errors.push(String(e.reason)); });
+window.faConfig = {
+  fields: [{id:'UF_CRM_A', name:'Поле А', type:'string', editable:true}, {id:'UF_CRM_B', name:'Поле Б', type:'string', editable:true}, {id:'UF_CRM_FILE', name:'Документ', type:'file', editable:true}],
+  stages: [{id:'NEW',name:'Новая',categoryName:'Основная'}, {id:'C',name:'Стадия С',categoryName:'Основная'}, {id:'C2:FINAL',name:'Финальная',categoryName:'Другая воронка'}],
+  workflows: [{id:'42',name:'Тестовый БП'}], rules: []
+};
+window.submitted = null;
+HTMLFormElement.prototype.submit = function () { submitted = JSON.parse(this.querySelector('[name="config_json"]').value); };
+var events = {};
+window.BX = {
+  ready: function (fn) { document.addEventListener('DOMContentLoaded', fn); },
+  message: function () { return 'test-sessid'; }, bitrix_sessid: function () { return 'test-sessid'; },
+  addCustomEvent: function (name, fn) { (events[name] ||= []).push(fn); }
+};
+// Минимальный контракт совместимости штатных PopupWindow / PopupWindowButton.
+BX.PopupWindowButton = function (options) {
+  this.el = document.createElement('button'); this.el.textContent = options.text;
+  this.el.addEventListener('click', options.events.click.bind(this));
+  this.setName = function (name) { this.el.textContent = name; };
+  this.getContainer = function () { return this.el; };
+};
+BX.PopupWindowButtonLink = BX.PopupWindowButton;
+BX.PopupWindow = function (id, target, options) {
+  this.el = document.createElement('div'); this.el.id = id;
+  this.el.style.cssText = 'position:fixed;inset:10%;background:white;z-index:99999;overflow:auto;border:2px solid #abc;padding:20px';
+  var title = document.createElement('h3'); title.textContent = options.titleBar;
+  this.el.append(title, options.content);
+  (options.buttons || []).forEach(button => this.el.appendChild(button.el));
+  this.show = function () { document.body.appendChild(this.el); };
+  this.close = function () { options.events.onPopupClose.call(this); };
+  this.destroy = function () { this.el.remove(); };
+};
+window.testFetchCalls = [];
+window.saveFails = true;
+window.fetch = async function (url, config) {
+  testFetchCalls.push({url, form:config.body});
+  const token = config.body.get('token');
+  if (url.endsWith('.load')) return {ok:true, json: async () => ({status:'success',data:{token,dealId:6245,title:'Документы',requirements:[{title:'Документы',mode:'any',fieldIds:['UF_CRM_A','UF_CRM_B']}],fields:faConfig.fields.slice(0,2).map(field => ({...field,value:'',filled:false}))}})};
+  if (saveFails) return {ok:true, json: async () => ({status:'error',errors:[{message:'Ошибка CRM: повторите попытку'}]})};
+  sessionStorage.setItem('fa-test-success', JSON.stringify({count:window.assertions, errors}));
+  return {ok:true, json:async () => ({status:'success',data:{saved:true,dealId:6245,stageId:'C'}})};
+};
+</script>
+<script src="../install/js/derykams.fieldaudit/settings.js"></script>
+<script src="../install/js/derykams.fieldaudit/runtime.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', async function () {
+  const report = document.getElementById('test-result');
+  const success = sessionStorage.getItem('fa-test-success');
+  if(success){
+    sessionStorage.removeItem('fa-test-success');
+    const result = JSON.parse(success);
+    report.textContent = result.errors.length ? 'FAIL: ' + result.errors.join('; ') : 'OK: ' + result.count + ' browser assertions; successful save reloaded page';
+    return;
+  }
+  window.assertions = 0;
+  function check(condition, message){ ++window.assertions; if(!condition) throw new Error(message); }
+  function get(selector){ const el = document.querySelector(selector); if(!el) throw new Error('Missing: ' + selector); return el; }
+  function click(selector){ get(selector).click(); }
+  function change(selector, value){ const el=get(selector); el.value=value; el.dispatchEvent(new Event('change',{bubbles:true})); }
+  function input(selector, value){ const el=get(selector); el.value=value; el.dispatchEvent(new Event('input',{bubbles:true})); }
+  function save(){ click('[data-action="save-settings"]'); return submitted; }
+  function tick(){ return new Promise(resolve => setTimeout(resolve,10)); }
+  try {
+    check(document.querySelectorAll('.rule-card').length === 0,'Empty config must not create demo rules');
+    check(save().rules.length === 0,'Empty rules save');
+    click('[data-action="add-rule"]');
+    click('[data-action="add-leaf"]');
+    check(document.querySelectorAll('.cond-row').length === 2,'Two field rows');
+    check(Array.from(document.querySelectorAll('[data-action="set-operator"]')).every(el=>el.value==='not_filled'),'Identical operators allowed');
+    check(getComputedStyle(get('.cond-grid')).gridTemplateColumns.split(' ').length===5,'Five grid columns');
+    change('[data-action="set-rule-stage"]','C');
+    input('[data-action="set-rule-fill-title"]','Документы сделки');
+    check(save().rules[0].stageId==='C','Stage saved');
+    check(submitted.rules[0].action.fillMode==='any','New rule defaults to any');
+    check(submitted.rules[0].action.fillWindowTitle==='Документы сделки','Title input saved');
+    check(get('[data-action="set-rule-stage"]').options.length===4,'All category stages available');
+    click('[data-action="set-rule-action"][value="bp"]');
+    check(save().rules[0].action.type==='bp','Radio switch handled');
+    click('[data-action="set-rule-action"][value="fill"]');
+    change('[data-action="set-rule-fill-mode"]','all');
+    click('[data-action="preview-rule-fill"]');
+    input('#modalRoot [data-field-id="UF_CRM_A"]','A');
+    click('[data-action="submit-fill"]');
+    check(Boolean(document.querySelector('#modalRoot .modal')),'All mode rejects only one');
+    input('#modalRoot [data-field-id="UF_CRM_B"]','B');
+    click('[data-action="submit-fill"]');
+    check(!document.querySelector('#modalRoot .modal'),'All mode accepts both');
+    change('[data-action="set-rule-fill-mode"]','any');
+    click('[data-action="preview-rule-fill"]');
+    input('#modalRoot [data-field-id="UF_CRM_A"]','A');
+    click('[data-action="submit-fill"]');
+    check(!document.querySelector('#modalRoot .modal'),'Any mode accepts one');
+    click('[data-action="duplicate-rule"]');
+    const copy=save().rules[1];
+    check(copy.action.fillMode==='any' && copy.stageId==='C','Duplicate preserves action and stage');
+    click('.rule-card:last-child [data-action="delete-rule"]'); click('[data-action="confirm-yes"]');
+    click('[data-action="add-group"]');
+    check(document.querySelectorAll('.group.nested').length===1,'Nested groups available');
+    click('.group.nested [data-action="delete-node"]'); click('[data-action="confirm-yes"]');
+    click('[data-tab="simulator"]');
+    change('[data-action="sim-stage"]','C');
+    change('[data-action="sim-previous-stage"]','NEW');
+    click('[data-action="run-check"]');
+    check(Boolean(document.querySelector('#modalRoot .modal')),'Both empty and transition opens simulation popup');
+    input('#modalRoot [data-field-id="UF_CRM_B"]','B');
+    click('[data-action="submit-fill"]');
+    click('[data-action="run-check"]');
+    check(!document.querySelector('#modalRoot .modal'),'One filled passes next check');
+    input('[data-field-id="UF_CRM_B"][data-field="curr"]','');
+    change('[data-action="sim-previous-stage"]','C');
+    click('[data-action="run-check"]');
+    check(!document.querySelector('#modalRoot .modal'),'Same stage is not transition');
+    click('[data-action="run-tests"]');
+    check(!get('#testsResults').textContent.includes('FAIL'),'Built-in logic tests');
+    click('[data-tab="rules"]');
+    click('[data-action="delete-rule"]'); click('[data-action="confirm-yes"]');
+    check(save().rules.length===0,'Deleting last rule saves empty');
+    check(errors.length===0,'No errors while editing or simulating');
+    BX.FieldAuditRuntime.onResponse({status:'success',data:{}});
+    await tick();
+    check(testFetchCalls.length===0,'No module marker: no runtime requests');
+    const token='a'.repeat(48);
+    const response={status:'error',errors:[{message:'Заполните поля [DERYKAMS_FIELDAUDIT:'+token+']'}]};
+    events.onAjaxSuccess[0](response); events.onAjaxSuccess[0](response);
+    await tick();
+    check(testFetchCalls.length===1,'Duplicate transport events open once');
+    check(get('#derykams-fieldaudit-fill').textContent.includes('хотя бы одно'),'Runtime any explanation');
+    const buttons=()=>get('#derykams-fieldaudit-fill').querySelectorAll('button');
+    buttons()[0].click(); await tick();
+    check(testFetchCalls.length===1,'Runtime empty submit stays client-side');
+    get('#fa-fill-UF_CRM_A').value='A';
+    buttons()[0].click(); await tick();
+    check(testFetchCalls.length===2,'One filled sends save');
+    const form=testFetchCalls[1].form;
+    check(form.get('sessid')==='test-sessid' && form.get('token')===token,'Session and operation token sent');
+    check(JSON.parse(form.get('valuesJson')).UF_CRM_A==='A','Values submitted');
+    check(get('.fa-runtime-error').textContent.includes('Ошибка CRM'),'Server failure stays visible');
+    check(buttons()[0].textContent==='Сохранить и продолжить','Button reset after failure');
+    check(errors.length===0,'Runtime has no JS errors');
+    window.saveFails=false;
+    buttons()[0].click();
+  } catch (error) { report.textContent='FAIL: '+error.message+'; '+errors.join('; '); }
+});
+</script>
+</body></html>

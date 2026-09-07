@@ -1,0 +1,8 @@
+.fa-runtime { max-height: 65vh; overflow: auto; padding: 8px 12px; color: #333; }
+.fa-runtime-requirements { padding: 4px 14px; background: #eaf5fc; border-radius: 6px; margin-bottom: 18px; }
+.fa-runtime-field { margin: 16px 0; }
+.fa-runtime-field label { display: block; font-weight: 600; margin-bottom: 7px; }
+.fa-runtime-field small { display: block; margin-top: 6px; color: #626b75; }
+.fa-runtime-input { box-sizing: border-box; width: 100%; min-height: 38px; padding: 8px; border: 1px solid #bdc5ce; border-radius: 4px; }
+.fa-runtime textarea { min-height: 90px; }
+.fa-runtime-error { color: #b42318; white-space: pre-line; padding-top: 10px; }
