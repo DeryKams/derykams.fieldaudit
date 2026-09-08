@@ -462,110 +462,6 @@
 }.fa-root .muted-text{
   color:var(--muted);
   font-size:13px;
-}.fa-root .sim-grid{
-  display:grid;
-  grid-template-columns:minmax(0,1.35fr) minmax(360px,.65fr);
-  gap:16px;
-  align-items:start;
-}.fa-root .sim-field-row{
-  display:grid;
-  grid-template-columns:minmax(220px,1.2fr) minmax(140px,.8fr) minmax(140px,.8fr) 190px auto;
-  gap:12px;
-  align-items:center;
-  padding:12px;
-  border:1px solid var(--border);
-  border-radius:8px;
-  background:#fff;
-  margin-bottom:8px;
-}.fa-root .sim-field-name{
-  font-weight:700;
-  margin-bottom:4px;
-}.fa-root .sim-label{
-  display:block;
-  margin-bottom:4px;
-  font-size:12px;
-  color:var(--muted);
-  font-weight:700;
-}.fa-root .sim-status{
-  display:flex;
-  gap:6px;
-  flex-wrap:wrap;
-}.fa-root .sim-quick{
-  display:flex;
-  gap:4px;
-  flex-wrap:wrap;
-}.fa-root .result-card{
-  border:1px solid var(--border);
-  border-radius:8px;
-  background:#fff;
-  padding:12px;
-  margin-bottom:10px;
-}.fa-root .result-card.ok{
-  border-color:#cfe6b8;
-  background:#f9fcf3;
-}.fa-root .result-card.off{
-  background:#fafbfc;
-}.fa-root .result-head{
-  display:flex;
-  justify-content:space-between;
-  align-items:center;
-  gap:10px;
-  margin-bottom:8px;
-}.fa-root .result-title{
-  font-weight:700;
-}.fa-root .result-expression{
-  margin-bottom:8px;
-  color:#52616f;
-  font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;
-  font-size:13px;
-  word-break:break-word;
-}.fa-root .chip-list{
-  display:flex;
-  gap:6px;
-  flex-wrap:wrap;
-  margin-bottom:8px;
-}.fa-root .chip{
-  padding:5px 9px;
-  border-radius:14px;
-  border:1px solid var(--border);
-  background:#fff;
-  font-size:12px;
-}.fa-root .chip-success{
-  border-color:#cfe6b8;
-  background:var(--success-light);
-  color:#5d8a00;
-}.fa-root .chip-warning{
-  border-color:#ffe0b2;
-  background:var(--warning-light);
-  color:#9c5900;
-}.fa-root .chip-muted{
-  background:#f1f4f7;
-  color:var(--muted);
-}.fa-root .result-run{
-  margin-top:8px;
-}.fa-root .log-list{
-  max-height:280px;
-  overflow:auto;
-  border:1px solid var(--border);
-  border-radius:8px;
-  background:#fff;
-}.fa-root .log-item{
-  display:flex;
-  gap:8px;
-  padding:9px 10px;
-  border-bottom:1px solid #f0f3f6;
-  font-size:13px;
-}.fa-root .log-item:last-child{
-  border-bottom:0;
-}.fa-root .log-time{
-  color:var(--muted);
-  font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;
-  white-space:nowrap;
-}.fa-root .log-details{
-  display:block;
-  margin-top:2px;
-  color:var(--muted);
-  font-size:12px;
 }.fa-root .ui-table{
   width:100%;
   border-collapse:collapse;
@@ -691,25 +587,6 @@
   gap:8px;
   padding:14px 18px;
   border-top:1px solid var(--border);
-}.fa-root .fill-field{
-  margin-bottom:16px;
-}.fa-root .ui-form-label{
-  display:block;
-  margin-bottom:6px;
-  font-weight:700;
-}.fa-root .required{
-  color:var(--danger);
-}.fa-root .field-error{
-  display:none;
-  margin-top:6px;
-  color:var(--danger);
-  font-size:12px;
-  font-weight:700;
-}.fa-root .fill-field.has-error .ui-input{
-  border-color:var(--danger);
-  box-shadow:0 0 0 2px rgba(229,75,69,.12);
-}.fa-root .fill-field.has-error .field-error{
-  display:block;
 }.fa-root .toast-container{
   position:fixed;
   right:20px;
@@ -732,12 +609,7 @@
 @keyframes toastIn{
   from{opacity:0;transform:translateY(10px)}
   to{opacity:1;transform:translateY(0)}
-}@media(max-width:1200px){.fa-root .sim-grid{
-    grid-template-columns:1fr;
-  }.fa-root .sim-field-row{
-    grid-template-columns:1fr;
-    align-items:stretch;
-  }}@media(max-width:1100px){.fa-root .builder-inner{
+}@media(max-width:1100px){.fa-root .builder-inner{
     min-width:0;
   }.fa-root .cond-grid{
     display:block;
@@ -814,17 +686,19 @@
 .fa-root .rule-stage-condition,
 .fa-root .rule-action-block { margin: 18px 0; padding: 20px; border: 1px solid var(--border); border-radius: 8px; background: #f8fafc; }
 .fa-root .rule-section-title { font-weight: 700; margin-bottom: 14px; color: var(--text); }
-.fa-root .rule-stage-controls { display: grid; grid-template-columns: minmax(220px, 1fr) minmax(260px, 2fr); gap: 12px; }
+.fa-root .rule-stage-controls { align-items: start; display: grid; grid-template-columns: minmax(220px, 1fr) minmax(260px, 2fr); gap: 12px; }
 .fa-root .rule-action-row { display: flex; gap: 24px; flex-wrap: wrap; margin-bottom: 18px; }
 .fa-root .rule-action-row label { display: flex; gap: 8px; align-items: center; cursor: pointer; }
 .fa-root .rule-action-params { display: grid; gap: 14px; max-width: 760px; }
 .fa-root .rule-action-params label { display: grid; gap: 7px; font-weight: 600; }
+
+
 .fa-root .fill-fields-source { display: flex; flex-wrap: wrap; gap: 12px 24px; }
 .fa-root .fill-fields-source label { display: flex; align-items: center; gap: 8px; cursor: pointer; }
 .fa-root .fa-fill-fields { display: grid; gap: 8px; min-width: 0; }
 .fa-root .fa-fill-fields-status { display: flex; flex-wrap: wrap; gap: 8px 20px; color: var(--muted); font-size: 12px; }
 .fa-root .fa-fill-fields-list { max-height: 300px; overflow-y: auto; border: 1px solid var(--border); border-radius: 6px; background: #fff; }
-.fa-root .rule-action-params .fa-fill-field-option { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; cursor: pointer; border-bottom: 1px solid var(--border); }
+.fa-root .rule-action-params .fa-fill-field-option, .fa-root .fa-stage-picker .fa-fill-field-option { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; cursor: pointer; border-bottom: 1px solid var(--border); }
 .fa-root .fa-fill-field-option:last-of-type { border-bottom: 0; }
 .fa-root .fa-fill-field-option:hover, .fa-root .fa-fill-field-option:focus-within { background: var(--blue-light); }
 .fa-root .fa-fill-field-option input { flex: 0 0 auto; margin: 3px 0 0; width: 16px; height: 16px; }
@@ -833,8 +707,8 @@
 .fa-root .fa-fill-fields-empty { padding: 16px; color: var(--muted); text-align: center; }
 .fa-root .fa-fill-field-option[hidden], .fa-root .fa-fill-fields-empty[hidden] { display: none; }
 .fa-root .rule-action-params .ui-btn { justify-self: start; }
-.fa-root .sim-stage-controls { margin: 16px 0; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.fa-root .sim-stage-controls label { display: grid; gap: 6px; }
+
+
 @media (max-width: 900px) {
-  .fa-root .rule-stage-controls, .fa-root .sim-stage-controls { grid-template-columns: 1fr; }
+  .fa-root .rule-stage-controls { grid-template-columns: 1fr; }
 }

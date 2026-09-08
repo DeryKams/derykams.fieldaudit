@@ -23,6 +23,14 @@ use Bitrix\Main\Web\Json;
  */
 final class RuleEngine
 {
+	/** Новый список имеет приоритет, в том числе пустой; stageId — старый формат. */
+	public static function stageIds(array $rule): array
+	{
+		return array_key_exists('stageIds', $rule)
+			? $rule['stageIds']
+			: (($rule['stageId'] ?? '') !== '' ? [$rule['stageId']] : []);
+	}
+
 	/**
 	 * Оценивает все включённые правила, возвращает сработавшие.
 	 *
@@ -46,21 +54,21 @@ final class RuleEngine
 				continue;
 			}
 
-			/* Гейт по целевой стадии: действие срабатывает только если
-			   сделка переходит на указанную стадию (STAGE_ID нового значения). */
-			$targetStageId = (string)($rule['stageId'] ?? '');
+			// Между выбранными стадиями — ИЛИ, с деревом условий полей — И.
+			$targetStageIds = self::stageIds($rule);
+			$currentStageId = (string)($context['stageId'] ?? '');
 			$report('rule.stage', [
-				'targetStageId' => $targetStageId, 'stageMode' => $rule['stageMode'] ?? 'changed_to',
+				'targetStageIds' => $targetStageIds, 'stageMode' => $rule['stageMode'] ?? 'changed_to',
 				'previousStageId' => $context['previousStageId'] ?? '', 'stageId' => $context['stageId'] ?? '',
 			]);
-			if ($targetStageId !== '' && (string)($context['stageId'] ?? '') !== $targetStageId)
+			if ($targetStageIds !== [] && !in_array($currentStageId, $targetStageIds, true))
 			{
 				$report('rule.skip', ['reason' => 'target_stage_mismatch']);
 				continue;
 			}
 
-			if ($targetStageId !== '' && ($rule['stageMode'] ?? 'changed_to') === 'changed_to'
-				&& (string)($context['previousStageId'] ?? '') === $targetStageId)
+			if ($targetStageIds !== [] && ($rule['stageMode'] ?? 'changed_to') === 'changed_to'
+				&& (string)($context['previousStageId'] ?? '') === $currentStageId)
 			{
 				$report('rule.skip', ['reason' => 'stage_not_changed']);
 				continue;

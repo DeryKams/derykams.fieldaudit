@@ -191,7 +191,6 @@ if ($error !== '')
 			<div class="header-actions">
 				<button class="ui-btn ui-btn-light" data-action="add-rule"><?= Loc::getMessage('DERYKAMS_FA_BTN_ADD_RULE') ?></button>
 				<button class="ui-btn ui-btn-light" data-action="save-settings"><?= Loc::getMessage('DERYKAMS_FA_BTN_SAVE') ?></button>
-				<button class="ui-btn ui-btn-primary" data-action="switch-tab" data-tab="simulator"><?= Loc::getMessage('DERYKAMS_FA_BTN_SIMULATOR') ?></button>
 			</div>
 		</header>
 
@@ -199,14 +198,12 @@ if ($error !== '')
 			<nav class="tabs" aria-label="<?= Loc::getMessage('DERYKAMS_FA_TABS_ARIA') ?>">
 				<button class="tab" data-action="switch-tab" data-tab="analysis"><?= Loc::getMessage('DERYKAMS_FA_TAB_ANALYSIS') ?></button>
 				<button class="tab active" data-action="switch-tab" data-tab="rules"><?= Loc::getMessage('DERYKAMS_FA_TAB_RULES') ?></button>
-				<button class="tab" data-action="switch-tab" data-tab="simulator"><?= Loc::getMessage('DERYKAMS_FA_TAB_SIMULATOR') ?></button>
 				<button class="tab" data-action="switch-tab" data-tab="json"><?= Loc::getMessage('DERYKAMS_FA_TAB_JSON') ?></button>
 			</nav>
 
 			<div class="tab-panels">
 				<section class="tab-panel" id="tab-analysis"></section>
 				<section class="tab-panel active" id="tab-rules"></section>
-				<section class="tab-panel" id="tab-simulator"></section>
 				<section class="tab-panel" id="tab-json"></section>
 			</div>
 		</div>

@@ -8,11 +8,10 @@
   <button data-action="add-rule">Добавить правило</button><button data-action="save-settings">Сохранить</button>
   <nav class="tabs">
     <button class="tab" data-action="switch-tab" data-tab="rules">Правила</button>
-    <button class="tab" data-action="switch-tab" data-tab="simulator">Симуляция</button>
     <button class="tab" data-action="switch-tab" data-tab="json">JSON</button>
   </nav>
   <section class="tab-panel" id="tab-analysis"></section><section class="tab-panel" id="tab-rules"></section>
-  <section class="tab-panel" id="tab-simulator"></section><section class="tab-panel" id="tab-json"></section>
+  <section class="tab-panel" id="tab-json"></section>
   <div id="modalRoot"></div><div id="toastContainer"></div>
 </div></div>
 <script>
@@ -89,54 +88,25 @@ document.addEventListener('DOMContentLoaded', async function () {
     check(document.querySelectorAll('.cond-row').length === 2,'Two field rows');
     check(Array.from(document.querySelectorAll('[data-action="set-operator"]')).every(el=>el.value==='not_filled'),'Identical operators allowed');
     check(getComputedStyle(get('.cond-grid')).gridTemplateColumns.split(' ').length===5,'Five grid columns');
-    change('[data-action="set-rule-stage"]','C');
+    click('[data-action="set-rule-stage"][value="C"]');
     input('[data-action="set-rule-fill-title"]','Документы сделки');
-    check(save().rules[0].stageId==='C','Stage saved');
+    check(save().rules[0].stageIds.join(',')==='C','Stage saved');
     check(submitted.rules[0].action.fillMode==='any','New rule defaults to any');
     check(submitted.rules[0].action.fillWindowTitle==='Документы сделки','Title input saved');
-    check(get('[data-action="set-rule-stage"]').options.length===4,'All category stages available');
+    check(document.querySelectorAll('[data-action="set-rule-stage"]').length===3,'All category stages available');
     click('[data-action="set-rule-action"][value="bp"]');
     check(save().rules[0].action.type==='bp','Radio switch handled');
     click('[data-action="set-rule-action"][value="fill"]');
-    change('[data-action="set-rule-fill-mode"]','all');
-    click('[data-action="preview-rule-fill"]');
-    input('#modalRoot [data-field-id="UF_CRM_A"]','A');
-    click('[data-action="submit-fill"]');
-    check(Boolean(document.querySelector('#modalRoot .modal')),'All mode rejects only one');
-    input('#modalRoot [data-field-id="UF_CRM_B"]','B');
-    click('[data-action="submit-fill"]');
-    check(!document.querySelector('#modalRoot .modal'),'All mode accepts both');
-    change('[data-action="set-rule-fill-mode"]','any');
-    click('[data-action="preview-rule-fill"]');
-    input('#modalRoot [data-field-id="UF_CRM_A"]','A');
-    click('[data-action="submit-fill"]');
-    check(!document.querySelector('#modalRoot .modal'),'Any mode accepts one');
     click('[data-action="duplicate-rule"]');
     const copy=save().rules[1];
-    check(copy.action.fillMode==='any' && copy.stageId==='C','Duplicate preserves action and stage');
+    check(copy.action.fillMode==='any' && copy.stageIds.join(',')==='C','Duplicate preserves action and stage');
     click('.rule-card:last-child [data-action="delete-rule"]'); click('[data-action="confirm-yes"]');
     click('[data-action="add-group"]');
     check(document.querySelectorAll('.group.nested').length===1,'Nested groups available');
     click('.group.nested [data-action="delete-node"]'); click('[data-action="confirm-yes"]');
-    click('[data-tab="simulator"]');
-    change('[data-action="sim-stage"]','C');
-    change('[data-action="sim-previous-stage"]','NEW');
-    click('[data-action="run-check"]');
-    check(Boolean(document.querySelector('#modalRoot .modal')),'Both empty and transition opens simulation popup');
-    input('#modalRoot [data-field-id="UF_CRM_B"]','B');
-    click('[data-action="submit-fill"]');
-    click('[data-action="run-check"]');
-    check(!document.querySelector('#modalRoot .modal'),'One filled passes next check');
-    input('[data-field-id="UF_CRM_B"][data-field="curr"]','');
-    change('[data-action="sim-previous-stage"]','C');
-    click('[data-action="run-check"]');
-    check(!document.querySelector('#modalRoot .modal'),'Same stage is not transition');
-    click('[data-action="run-tests"]');
-    check(!get('#testsResults').textContent.includes('FAIL'),'Built-in logic tests');
-    click('[data-tab="rules"]');
     click('[data-action="delete-rule"]'); click('[data-action="confirm-yes"]');
     check(save().rules.length===0,'Deleting last rule saves empty');
-    check(errors.length===0,'No errors while editing or simulating');
+    check(errors.length===0,'No errors while editing');
     BX.FieldAuditRuntime.onResponse({status:'success',data:{}});
     await tick();
     check(testFetchCalls.length===0,'No module marker: no runtime requests');

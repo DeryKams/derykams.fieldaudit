@@ -23,13 +23,7 @@ var OPERATORS = {
 var appState = {
   activeTab:'rules',
   rules:[],
-  fieldStates:{},
-  log:[],
-  tests:[],
   confirmCallback:null,
-  fillModal:null,
-  simStage:'',
-  simPreviousStage:''
 };
 
 var idCounter = 0;
@@ -97,21 +91,6 @@ function operatorShort(value){
   return op ? op.short : operatorLabel(value);
 }
 
-function sampleValue(field){
-  return field && field.type === 'file' ? 'document.pdf' : 'Заполненное значение';
-}
-
-function sampleChangedValue(field){
-  return field && field.type === 'file' ? 'document_v2.pdf' : 'Новое значение';
-}
-
-function ensureFieldState(fieldId){
-  if(!appState.fieldStates[fieldId]){
-    appState.fieldStates[fieldId] = {prev:'', curr:''};
-  }
-  return appState.fieldStates[fieldId];
-}
-
 function optionHtml(value,label,selected,disabled){
   return '<option value="' + escapeHtml(value) + '"' +
     (selected ? ' selected' : '') +
@@ -150,7 +129,7 @@ function createRule(title, logic, children){
     enabled: true,
     expanded: true,
     root: createGroup(logic, children),
-    stageId: '',
+    stageIds: [],
     stageMode: 'changed_to',
     action: {
       type: 'fill',
@@ -174,7 +153,7 @@ function loadRules(){
         enabled: rule.enabled !== false,
         expanded: true,
         root: root,
-        stageId: rule.stageId || '',
+        stageIds: ruleStageIds(rule),
         stageMode: rule.stageMode || 'changed_to',
         action: {
           type: action.type === 'bp' ? 'bp' : 'fill',
@@ -235,7 +214,7 @@ function cloneRule(rule){
     enabled: rule.enabled,
     expanded: true,
     root: cloneNode(rule.root),
-    stageId: rule.stageId || '',
+    stageIds: ruleStageIds(rule),
     stageMode: rule.stageMode || 'changed_to',
     fillFieldsSource: rule.fillFieldsSource,
     action: JSON.parse(JSON.stringify(rule.action || {}))
@@ -316,97 +295,10 @@ function normalizeLeaf(leaf){
   }
 }
 
-function checkLeaf(leaf, states){
-  var st = states[leaf.fieldId] || {prev:'', curr:''};
-  var prev = String(st.prev || '').trim();
-  var curr = String(st.curr || '').trim();
-  var changed = prev !== curr;
-  var filled = curr !== '';
-  var prevFilled = prev !== '';
-
-  switch(leaf.operator){
-    case 'changed': return changed;
-    case 'changed_to_filled': return changed && filled;
-    case 'changed_to_empty': return changed && !filled && prevFilled;
-    case 'filled': return filled;
-    case 'not_filled': return !filled;
-    default: return false;
-  }
-}
-
-/* Возвращает результат узла и листья, которые реально вошли в выполненную ветку. */
-function evalNode(node, states){
-  if(node.type === 'leaf'){
-    var ok = checkLeaf(node, states);
-    return {ok:ok, activeLeaves: ok ? [node] : []};
-  }
-
-  if(!node.children.length){
-    return {ok:false, activeLeaves:[]};
-  }
-
-  var childResults = node.children.map(function(child){
-    return evalNode(child, states);
-  });
-
-  var resultOk = node.logic === 'and'
-    ? childResults.every(function(item){ return item.ok; })
-    : childResults.some(function(item){ return item.ok; });
-
-  var active = [];
-  if(resultOk){
-    childResults.forEach(function(item){
-      if(item.ok) active = active.concat(item.activeLeaves);
-    });
-  }
-
-  return {ok:resultOk, activeLeaves:active};
-}
-
 function fillFieldsForRule(rule){
   var ids = (rule.action && rule.action.fillFieldIds) || [];
   if(!ids.length) ids = collectLeaves(rule.root).filter(function(leaf){ return leaf.operator === 'not_filled'; }).map(function(leaf){ return leaf.fieldId; });
   return ids.filter(function(id, index){ return ids.indexOf(id) === index; }).map(getField).filter(Boolean);
-}
-
-function fillSatisfied(fields, mode, states){
-  if(!fields.length) return true;
-  var values = fields.map(function(field){ return String((states[field.id] || {}).curr || '').trim() !== ''; });
-  return mode === 'any' ? values.some(Boolean) : values.every(Boolean);
-}
-
-function collectActions(rule, activeLeaves){
-  var action = rule.action || {};
-  return {
-    type: action.type === 'bp' ? 'bp' : 'fill',
-    bpId: action.bpId || '',
-    fillFields: fillFieldsForRule(rule),
-    fillMode: action.fillMode === 'any' ? 'any' : 'all',
-    fillTitle: action.fillWindowTitle || 'Заполните обязательные поля'
-  };
-}
-
-function evaluateAllRules(){
-  return appState.rules.map(function(rule){
-    if(rule.stageId && (rule.stageId !== appState.simStage || ((rule.stageMode || 'changed_to') === 'changed_to' && appState.simPreviousStage === rule.stageId))){
-      return {rule: rule, leaves: collectLeaves(rule.root),
-        evalRes: {ok:false, activeLeaves:[]}, activeIds: {},
-        actions: collectActions(rule, [])};
-    }
-    var leaves = collectLeaves(rule.root);
-    var evalRes = rule.enabled
-      ? evalNode(rule.root, appState.fieldStates)
-      : {ok:false, activeLeaves:[]};
-    var activeIds = {};
-    evalRes.activeLeaves.forEach(function(leaf){ activeIds[leaf.id] = true; });
-    return {
-      rule: rule,
-      leaves: leaves,
-      evalRes: evalRes,
-      activeIds: activeIds,
-      actions: collectActions(rule, evalRes.activeLeaves)
-    };
-  });
 }
 
 function nodeText(node, isRoot){
@@ -493,7 +385,7 @@ function validateRule(rule){
   if(action.type === 'bp' && !getBp(action.bpId)){
     errors.push('Не выбран бизнес-процесс для действия правила.');
   }
-  if(rule.stageId && !STAGE_CATALOG.some(function(stage){ return stage.id === rule.stageId; })) errors.push('Выбранная стадия не найдена.');
+  if(ruleStageIds(rule).some(function(id){ return !STAGE_CATALOG.some(function(stage){ return stage.id === id; }); })) errors.push('Одна из выбранных стадий не найдена.');
   if(action.type === 'fill' && !fillFieldsForRule(rule).length) errors.push('Укажите поля для окна заполнения или добавьте условия «Не заполнено».');
   if(action.type === 'fill'){
     if(rule.fillFieldsSource === 'manual' && !(action.fillFieldIds || []).length){
@@ -580,7 +472,7 @@ function serialize(){
         title: rule.title,
         enabled: rule.enabled,
         condition: serializeNode(rule.root),
-        stageId: rule.stageId || '',
+        stageIds: ruleStageIds(rule),
         stageMode: rule.stageMode || 'changed_to',
         action: {
           type: (rule.action && rule.action.type === 'bp') ? 'bp' : 'fill',
@@ -836,7 +728,7 @@ function renderRuleSummaryInner(rule){
   var validation = validateRule(rule);
   return '<div class="summary-block">' +
       '<div class="summary-title">Формула условия</div>' +
-      '<div class="summary-expression">' + escapeHtml(nodeText(rule.root, true) + (rule.stageId ? ' И ' + ((rule.stageMode || 'changed_to') === 'changed_to' ? 'переход на стадию ' : 'стадия = ') + ((STAGE_CATALOG.find(function(stage){ return stage.id === rule.stageId; }) || {}).name || rule.stageId) : '')) + '</div>' +
+      '<div class="summary-expression">' + escapeHtml(nodeText(rule.root, true) + stageConditionText(rule)) + '</div>' +
     '</div>' +
     '<div class="summary-block">' +
       '<div class="summary-title">Действия правила</div>' +
@@ -849,10 +741,43 @@ function renderRuleSummaryInner(rule){
     validationAlertHtml(validation);
 }
 
-function stageOptions(selected){
-  return STAGE_CATALOG.map(function(stage){
-    return optionHtml(stage.id, (stage.categoryName ? stage.categoryName + ' / ' : '') + stage.name + ' — ' + stage.id, stage.id === selected, false);
-  }).join('');
+function ruleStageIds(rule){
+  var ids = Array.isArray(rule.stageIds) ? rule.stageIds : (rule.stageId ? [rule.stageId] : []);
+  return ids.filter(function(id, index){ return typeof id === 'string' && id !== '' && ids.indexOf(id) === index; });
+}
+
+function stageConditionText(rule){
+  var ids = ruleStageIds(rule);
+  if(!ids.length) return '';
+  var names = ids.map(function(id){
+    var stage = STAGE_CATALOG.find(function(item){ return item.id === id; });
+    return stage ? (stage.categoryName ? stage.categoryName + ' / ' : '') + stage.name : id;
+  });
+  return ' И ' + ((rule.stageMode || 'changed_to') === 'changed_to' ? 'переход на одну из стадий: ' : 'стадия — одна из: ') + '(' + names.join(' ИЛИ ') + ')';
+}
+
+function stageSelectionText(rule){
+  var count = ruleStageIds(rule).length;
+  return count ? 'Выбрано стадий: ' + count : 'Без ограничения по стадии';
+}
+
+function renderStagePicker(rule){
+  var selected = ruleStageIds(rule);
+  var stages = STAGE_CATALOG.slice();
+  // Сохранённую, но удалённую из CRM стадию можно снять вручную.
+  selected.forEach(function(id){
+    if(!stages.some(function(stage){ return stage.id === id; })) stages.push({id:id, name:'Стадия не найдена'});
+  });
+  return '<div class="fa-fill-fields fa-stage-picker">' +
+    '<label>Выберите стадии<input type="search" class="ui-input" data-action="search-rule-stages" placeholder="Поиск по воронке, названию или ID стадии" autocomplete="off"></label>' +
+    '<div class="fa-fill-fields-status" aria-live="polite"><span class="fa-fill-fields-count">' + stageSelectionText(rule) + '</span>' +
+      '<span class="fa-fill-fields-found">Найдено: ' + stages.length + '</span></div>' +
+    '<div class="fa-fill-fields-list" role="group" aria-label="Стадии проверки правила">' + stages.map(function(stage){
+      var name = (stage.categoryName ? stage.categoryName + ' / ' : '') + stage.name;
+      return '<label class="fa-fill-field-option" data-search="' + escapeHtml((name + ' ' + stage.id).toLowerCase()) + '">' +
+        '<input type="checkbox" data-action="set-rule-stage" data-rule-id="' + escapeHtml(rule.id) + '" value="' + escapeHtml(stage.id) + '"' + (selected.indexOf(stage.id) >= 0 ? ' checked' : '') + '>' +
+        '<span class="fa-fill-field-caption"><span>' + escapeHtml(name) + '</span><small>' + escapeHtml(stage.id) + '</small></span></label>';
+    }).join('') + '<div class="fa-fill-fields-empty"' + (stages.length ? ' hidden' : '') + '>Стадии не найдены.</div></div></div>';
 }
 
 function renderStageCondition(rule){
@@ -860,13 +785,11 @@ function renderStageCondition(rule){
     '<div class="rule-section-title">2. Дополнительное условие: стадия сделки</div>' +
     '<div class="rule-stage-controls">' +
       '<select class="ui-select" data-action="set-rule-stage-mode" data-rule-id="' + rule.id + '">' +
-        optionHtml('changed_to', 'Сделка переходит на стадию', (rule.stageMode || 'changed_to') === 'changed_to', false) +
-        optionHtml('is', 'Сделка находится на стадии', rule.stageMode === 'is', false) +
+        optionHtml('changed_to', 'Сделка переходит на одну из выбранных стадий', (rule.stageMode || 'changed_to') === 'changed_to', false) +
+        optionHtml('is', 'Сделка находится на одной из выбранных стадий', rule.stageMode === 'is', false) +
       '</select>' +
-      '<select class="ui-select" data-action="set-rule-stage" data-rule-id="' + rule.id + '">' +
-        optionHtml('', 'Без ограничения по стадии', !rule.stageId, false) + stageOptions(rule.stageId) +
-      '</select>' +
-    '</div><div class="cell-hint">Условия полей И условие стадии должны выполниться одновременно.</div>' +
+      renderStagePicker(rule) +
+    '</div><div class="cell-hint">Условия полей И любая из выбранных стадий. Если стадии не выбраны — без ограничения по стадии.</div>' +
     (!STAGE_CATALOG.length ? '<div class="ui-alert ui-alert-warning">Стадии не загружены. Проверьте доступность CRM и воронок.</div>' : '') +
     '</div>';
 }
@@ -928,8 +851,7 @@ function renderRuleActionBlock(rule){
       (isManual
         ? renderFillFieldPicker(rule)
         : '<div class="cell-hint">В окно попадут поля, для которых выше задано условие «Не заполнено».</div>') +
-      '<label>Заголовок окна<input class="ui-input" type="text" value="' + escapeHtml(action.fillWindowTitle || '') + '" data-action="set-rule-fill-title" data-rule-id="' + rule.id + '"></label>' +
-      '<button class="ui-btn ui-btn-light ui-btn-sm" data-action="preview-rule-fill" data-rule-id="' + rule.id + '">Пример окна</button>';
+      '<label>Заголовок окна<input class="ui-input" type="text" value="' + escapeHtml(action.fillWindowTitle || '') + '" data-action="set-rule-fill-title" data-rule-id="' + rule.id + '"></label>';
   }
   return '<div class="rule-action-block">' +
     '<div class="rule-section-title">3. Одно действие для всего правила</div>' +
@@ -1027,420 +949,6 @@ function updateRuleSummary(ruleId){
   if(rule && el) el.innerHTML = renderRuleSummaryInner(rule);
 }
 
-function getSimulationFields(){
-  var map = {};
-  var result = [];
-  appState.rules.forEach(function(rule){
-    if(!rule.enabled) return;
-    collectLeaves(rule.root).forEach(function(leaf){
-      var field = getField(leaf.fieldId);
-      if(field && !map[field.id]){
-        map[field.id] = true;
-        result.push(field);
-      }
-    });
-  });
-  return result;
-}
-
-function fieldStatusHtml(fieldId){
-  var st = ensureFieldState(fieldId);
-  var prev = String(st.prev || '').trim();
-  var curr = String(st.curr || '').trim();
-  var changed = prev !== curr;
-  var filled = curr !== '';
-
-  return '<span class="ui-badge ' + (filled ? 'ui-badge-info' : 'ui-badge-muted') + '">' +
-      (filled ? 'Заполнено' : 'Пусто') +
-    '</span>' +
-    '<span class="ui-badge ' + (changed ? 'ui-badge-success' : 'ui-badge-muted') + '">' +
-      (changed ? 'Изменено' : 'Без изменений') +
-    '</span>';
-}
-
-function renderSimFieldRow(field){
-  var st = ensureFieldState(field.id);
-  var typeLabel = field.type === 'file' ? 'Файл' : 'Строка';
-  var typeClass = field.type === 'file' ? 'ui-badge-warning' : 'ui-badge-info';
-  var placeholder = field.type === 'file' ? 'имя файла' : 'значение';
-
-  return '<div class="sim-field-row" id="sim-row-' + field.id + '">' +
-    '<div class="sim-field">' +
-      '<div class="sim-field-name">' + escapeHtml(field.name) + '</div>' +
-      '<div class="field-meta">' +
-        '<span class="ui-badge ' + typeClass + '">' + typeLabel + '</span>' +
-        '<span class="field-id">' + escapeHtml(field.id) + '</span>' +
-      '</div>' +
-    '</div>' +
-    '<div class="sim-input">' +
-      '<label class="sim-label">Было</label>' +
-      '<input class="ui-input" type="text" value="' + escapeHtml(st.prev) + '" placeholder="пусто" data-action="sim-value" data-field-id="' + field.id + '" data-field="prev">' +
-    '</div>' +
-    '<div class="sim-input">' +
-      '<label class="sim-label">Стало</label>' +
-      '<input class="ui-input" type="text" value="' + escapeHtml(st.curr) + '" placeholder="' + placeholder + '" data-action="sim-value" data-field-id="' + field.id + '" data-field="curr">' +
-    '</div>' +
-    '<div class="sim-status" id="sim-status-' + field.id + '">' + fieldStatusHtml(field.id) + '</div>' +
-    '<div class="sim-quick">' +
-      '<button class="ui-btn ui-btn-light ui-btn-sm" data-action="sim-quick" data-field-id="' + field.id + '" data-mode="clear">Очистить</button>' +
-      '<button class="ui-btn ui-btn-light ui-btn-sm" data-action="sim-quick" data-field-id="' + field.id + '" data-mode="fill">Заполнить</button>' +
-      '<button class="ui-btn ui-btn-light ui-btn-sm" data-action="sim-quick" data-field-id="' + field.id + '" data-mode="change">Изменить</button>' +
-    '</div>' +
-    '</div>';
-}
-
-function renderSimulationResultsHtml(){
-  var results = evaluateAllRules();
-  if(!results.length) return '<div class="empty">Нет правил для проверки.</div>';
-
-  return results.map(function(res){
-    var rule = res.rule;
-    var statusClass = '';
-    var statusBadge = '<span class="ui-badge ui-badge-muted">Не выполнено</span>';
-
-    if(!rule.enabled){
-      statusClass = 'off';
-      statusBadge = '<span class="ui-badge ui-badge-warning">Правило отключено</span>';
-    } else if(res.evalRes.ok){
-      statusClass = 'ok';
-      statusBadge = '<span class="ui-badge ui-badge-success">Условие выполнено</span>';
-    }
-
-    var chips = res.leaves.map(function(leaf){
-      var leafOk = checkLeaf(leaf, appState.fieldStates);
-      var isActive = Boolean(res.activeIds[leaf.id]);
-      var chipClass = 'chip-muted';
-      var chipTitle = 'Условие ложно';
-
-      if(!rule.enabled){
-        chipClass = 'chip-muted';
-        chipTitle = 'Правило отключено';
-      } else if(isActive){
-        chipClass = 'chip-success';
-        chipTitle = 'Условие истинно и входит в выполненную ветку';
-      } else if(leafOk){
-        chipClass = 'chip-warning';
-        chipTitle = 'Условие истинно, но родительская группа не выполнена';
-      }
-
-      return '<span class="chip ' + chipClass + '" title="' + escapeHtml(chipTitle) + '">' +
-        escapeHtml(getFieldName(leaf.fieldId)) + ' · ' + escapeHtml(operatorShort(leaf.operator)) +
-        '</span>';
-    }).join('');
-
-    var actionsHtml = '';
-    if(!rule.enabled){
-      actionsHtml = '<div class="muted-text">Действия не выполняются, пока правило отключено.</div>';
-    } else if(!res.evalRes.ok){
-      actionsHtml = '<div class="muted-text">Действия не выполняются.</div>';
-    } else {
-      var parts = [];
-      if(res.actions.type === 'bp'){
-        var process = getBp(res.actions.bpId);
-        parts.push('<span class="ui-badge ui-badge-info">БП: ' + escapeHtml(process ? process.name : 'Не выбран') + '</span>');
-      }
-      if(res.actions.type === 'fill' && res.actions.fillFields.length && !fillSatisfied(res.actions.fillFields, res.actions.fillMode, appState.fieldStates)){
-        parts.push('<span class="ui-badge ui-badge-danger">Окно заполнения: ' +
-          escapeHtml(res.actions.fillFields.map(function(field){ return field.name; }).join(', ')) +
-          '</span>');
-      }
-      if(!parts.length){
-        parts.push('<span class="ui-badge ui-badge-success">Требования заполнения уже выполнены</span>');
-      }
-      actionsHtml = '<div class="summary-actions">' + parts.join('') + '</div>' +
-        '<div class="result-run"><button class="ui-btn ui-btn-primary ui-btn-sm" data-action="run-check" data-rule-id="' + rule.id + '">Выполнить действия правила</button></div>';
-    }
-
-    return '<div class="result-card ' + statusClass + '">' +
-      '<div class="result-head">' +
-        '<div class="result-title">' + escapeHtml(rule.title || 'Без названия') + '</div>' +
-        statusBadge +
-      '</div>' +
-      '<div class="result-expression">' + escapeHtml(nodeText(rule.root, true) + (rule.stageId ? ' И ' + ((rule.stageMode || 'changed_to') === 'changed_to' ? 'переход на стадию ' : 'стадия = ') + ((STAGE_CATALOG.find(function(stage){ return stage.id === rule.stageId; }) || {}).name || rule.stageId) : '')) + '</div>' +
-      '<div class="chip-list">' + (chips || '<span class="chip chip-muted">Нет условий</span>') + '</div>' +
-      actionsHtml +
-      '</div>';
-  }).join('');
-}
-
-function renderSimulationResults(){
-  var el = document.getElementById('simResults');
-  if(el) el.innerHTML = renderSimulationResultsHtml();
-}
-
-function updateFieldStatus(fieldId){
-  var el = document.getElementById('sim-status-' + fieldId);
-  if(el) el.innerHTML = fieldStatusHtml(fieldId);
-}
-
-function renderLogItems(){
-  if(!appState.log.length){
-    return '<div class="empty">Событий пока нет.</div>';
-  }
-  return appState.log.map(function(item){
-    return '<div class="log-item log-' + item.type + '">' +
-      '<span class="log-time">' + item.time.toLocaleTimeString('ru-RU') + '</span>' +
-      '<span><strong>' + escapeHtml(item.message) + '</strong>' +
-      (item.details ? '<span class="log-details">' + escapeHtml(item.details) + '</span>' : '') +
-      '</span>' +
-      '</div>';
-  }).join('');
-}
-
-function renderLog(){
-  var el = document.getElementById('logList');
-  if(el) el.innerHTML = renderLogItems();
-}
-
-function addLog(type, message, details){
-  appState.log.unshift({
-    id: uid('log'),
-    time: new Date(),
-    type: type,
-    message: message,
-    details: details || ''
-  });
-  if(appState.log.length > 80) appState.log.pop();
-  renderLog();
-}
-
-function renderTestsResultsHtml(){
-  if(!appState.tests.length){
-    return '<div class="empty">Тесты ещё не запускались. Нажмите «Прогнать тесты логики».</div>';
-  }
-
-  var allPass = appState.tests.every(function(test){ return test.pass; });
-  var rows = appState.tests.map(function(test){
-    return '<tr>' +
-      '<td>' + escapeHtml(test.name) + '</td>' +
-      '<td>' + (test.expect ? 'true' : 'false') + '</td>' +
-      '<td>' + (test.actual ? 'true' : 'false') + '</td>' +
-      '<td>' + test.expectActive + ' / ' + test.active + '</td>' +
-      '<td><span class="ui-badge ' + (test.pass ? 'ui-badge-success' : 'ui-badge-danger') + '">' +
-        (test.pass ? 'OK' : 'FAIL') +
-      '</span></td>' +
-      '</tr>';
-  }).join('');
-
-  return '<div class="ui-alert ' + (allPass ? 'ui-alert-success' : 'ui-alert-danger') + '">' +
-      (allPass ? 'Все сценарии логики пройдены.' : 'Есть сценарии, которые требуют проверки.') +
-    '</div>' +
-    '<div class="table-scroll"><table class="ui-table">' +
-      '<thead><tr><th>Сценарий</th><th>Ожидалось</th><th>Получено</th><th>Ожидалось активных / получено</th><th>Статус</th></tr></thead>' +
-      '<tbody>' + rows + '</tbody>' +
-    '</table></div>';
-}
-
-function renderTests(){
-  var el = document.getElementById('testsResults');
-  if(el) el.innerHTML = renderTestsResultsHtml();
-}
-
-function runLogicTests(){
-  var A = 'UF_CRM_1768379973';
-  var B = 'UF_CRM_1768379974';
-  var C = 'UF_CRM_1768379975';
-  var D = 'UF_CRM_1768379976';
-
-  function tLeaf(fieldId, trigger, operator){
-    return {
-      id: uid('test_leaf'),
-      type:'leaf',
-      fieldId: fieldId,
-      trigger: trigger,
-      operator: operator
-    };
-  }
-
-  function tGroup(logic, children){
-    return {
-      id: uid('test_group'),
-      type:'group',
-      logic: logic,
-      children: children
-    };
-  }
-
-  var cases = [
-    {
-      name:'И: оба файла не заполнены — окно заполнения срабатывает',
-      node:tGroup('and',[tLeaf(A,'fill','not_filled'), tLeaf(B,'fill','not_filled')]),
-      states:{},
-      expect:true,
-      expectActive:2
-    },
-    {
-      name:'И: один из двух файлов заполнен — проверка не срабатывает',
-      node:tGroup('and',[tLeaf(A,'fill','not_filled'), tLeaf(B,'fill','not_filled')]),
-      states:{},
-      expect:false,
-      expectActive:0
-    },
-    {
-      name:'И: оба файла заполнены — проверка не срабатывает',
-      node:tGroup('and',[tLeaf(A,'fill','not_filled'), tLeaf(B,'fill','not_filled')]),
-      states:{},
-      expect:false,
-      expectActive:0
-    },
-    {
-      name:'ИЛИ: один из двух файлов не заполнен — срабатывает только пустое поле',
-      node:tGroup('or',[tLeaf(A,'fill','not_filled'), tLeaf(B,'fill','not_filled')]),
-      states:{},
-      expect:true,
-      expectActive:1
-    },
-    {
-      name:'ИЛИ: оба файла заполнены — проверка не срабатывает',
-      node:tGroup('or',[tLeaf(A,'fill','not_filled'), tLeaf(B,'fill','not_filled')]),
-      states:{},
-      expect:false,
-      expectActive:0
-    },
-    {
-      name:'И: строка изменилась и счёт заполнен — условие true',
-      node:tGroup('and',[tLeaf(D,'change','changed'), tLeaf(C,'fill','filled')]),
-      states:{},
-      expect:true,
-      expectActive:2
-    },
-    {
-      name:'И: строка изменилась, но счёт пустой — условие false',
-      node:tGroup('and',[tLeaf(D,'change','changed'), tLeaf(C,'fill','filled')]),
-      states:{},
-      expect:false,
-      expectActive:0
-    },
-    {
-      name:'Вложенное: (изменение И файл пустой) ИЛИ комментарий заполнен — первая ветка true',
-      node:tGroup('or',[
-        tGroup('and',[tLeaf(D,'change','changed'), tLeaf(A,'fill','not_filled')]),
-        tLeaf(C,'fill','filled')
-      ]),
-      states:{},
-      expect:true,
-      expectActive:2
-    },
-    {
-      name:'Вложенное: первая ветка false, вторая true — активна только вторая ветка',
-      node:tGroup('or',[
-        tGroup('and',[tLeaf(D,'change','changed'), tLeaf(A,'fill','not_filled')]),
-        tLeaf(C,'fill','filled')
-      ]),
-      states:{},
-      expect:true,
-      expectActive:1
-    },
-    {
-      name:'Вложенное: все ветки false — действия не срабатывают',
-      node:tGroup('or',[
-        tGroup('and',[tLeaf(D,'change','changed'), tLeaf(A,'fill','not_filled')]),
-        tLeaf(C,'fill','filled')
-      ]),
-      states:{},
-      expect:false,
-      expectActive:0
-    }
-  ];
-
-  cases[1].states[A] = {prev:'', curr:'scan.pdf'};
-  cases[2].states[A] = {prev:'', curr:'scan.pdf'};
-  cases[2].states[B] = {prev:'', curr:'agreement.pdf'};
-  cases[3].states[A] = {prev:'', curr:'scan.pdf'};
-  cases[4].states[A] = {prev:'', curr:'scan.pdf'};
-  cases[4].states[B] = {prev:'', curr:'agreement.pdf'};
-  cases[5].states[D] = {prev:'старый комментарий', curr:'новый комментарий'};
-  cases[5].states[C] = {prev:'', curr:'12345'};
-  cases[6].states[D] = {prev:'старый комментарий', curr:'новый комментарий'};
-  cases[6].states[C] = {prev:'', curr:''};
-  cases[7].states[D] = {prev:'старый комментарий', curr:'новый комментарий'};
-  cases[7].states[A] = {prev:'', curr:''};
-  cases[7].states[C] = {prev:'', curr:''};
-  cases[8].states[D] = {prev:'старый комментарий', curr:'старый комментарий'};
-  cases[8].states[A] = {prev:'', curr:'scan.pdf'};
-  cases[8].states[C] = {prev:'', curr:'12345'};
-  cases[9].states[D] = {prev:'старый комментарий', curr:'старый комментарий'};
-  cases[9].states[A] = {prev:'', curr:'scan.pdf'};
-  cases[9].states[C] = {prev:'', curr:''};
-
-  appState.tests = cases.map(function(testCase){
-    var res = evalNode(testCase.node, testCase.states);
-    var pass = res.ok === testCase.expect && res.activeLeaves.length === testCase.expectActive;
-    return {
-      name: testCase.name,
-      expect: testCase.expect,
-      actual: res.ok,
-      expectActive: testCase.expectActive,
-      active: res.activeLeaves.length,
-      pass: pass
-    };
-  });
-
-  renderTests();
-
-  var allPass = appState.tests.every(function(test){ return test.pass; });
-  toast(allPass ? 'Все тесты логики пройдены' : 'Часть тестов не прошла', allPass ? 'success' : 'danger');
-  addLog(allPass ? 'success' : 'error', 'Выполнена юнит-проверка логики условий');
-}
-
-function renderSimulatorTab(){
-  var fields = getSimulationFields();
-  var fieldsHtml = fields.length
-    ? fields.map(renderSimFieldRow).join('')
-    : '<div class="ui-alert ui-alert-warning">Нет включённых правил с полями. Включите правило или добавьте поля.</div>';
-
-  var html = '<div class="tab-inner">' +
-    '<div class="section-card">' +
-      '<div class="section-head">' +
-        '<div>' +
-          '<h2 class="section-title">Симуляция значений полей</h2>' +
-          '<p class="section-subtitle">Задайте старое и новое значение, затем выполните проверку. Отобразятся только те действия, которые реально должны сработать.</p>' +
-        '</div>' +
-        '<div class="toolbar-actions">' +
-          '<button class="ui-btn ui-btn-light ui-btn-sm" data-action="sim-scenario" data-mode="clear">Все пустые</button>' +
-          '<button class="ui-btn ui-btn-light ui-btn-sm" data-action="sim-scenario" data-mode="fill">Все заполнены</button>' +
-          '<button class="ui-btn ui-btn-light ui-btn-sm" data-action="sim-scenario" data-mode="change">Все изменены</button>' +
-          '<button class="ui-btn ui-btn-light ui-btn-sm" data-action="sim-scenario" data-mode="random">Случайный сценарий</button>' +
-          '<button class="ui-btn ui-btn-primary" data-action="run-check">Запустить проверку</button>' +
-        '</div>' +
-      '</div>' +
-      '<div class="sim-stage-controls">' +
-        '<label>Стадия до изменения<select class="ui-select" data-action="sim-previous-stage">' + optionHtml('', 'Не указана', !appState.simPreviousStage, false) + stageOptions(appState.simPreviousStage) + '</select></label>' +
-        '<label>Стадия после изменения<select class="ui-select" data-action="sim-stage">' + optionHtml('', 'Не указана', !appState.simStage, false) + stageOptions(appState.simStage) + '</select></label>' +
-      '</div>' + fieldsHtml +
-    '</div>' +
-
-    '<div class="sim-grid">' +
-      '<div>' +
-        '<div class="section-card">' +
-          '<div class="section-head">' +
-            '<div><h3 class="section-title">Результат вычисления</h3></div>' +
-          '</div>' +
-          '<div id="simResults">' + renderSimulationResultsHtml() + '</div>' +
-        '</div>' +
-
-        '<div class="section-card">' +
-          '<div class="section-head">' +
-            '<div><h3 class="section-title">Юнит-проверка логики</h3></div>' +
-            '<button class="ui-btn ui-btn-light ui-btn-sm" data-action="run-tests">Прогнать тесты логики</button>' +
-          '</div>' +
-          '<div id="testsResults">' + renderTestsResultsHtml() + '</div>' +
-        '</div>' +
-      '</div>' +
-
-      '<div class="section-card">' +
-        '<div class="section-head">' +
-          '<div><h3 class="section-title">Журнал событий</h3></div>' +
-          '<button class="ui-btn ui-btn-light ui-btn-sm" data-action="clear-log">Очистить</button>' +
-        '</div>' +
-        '<div id="logList" class="log-list">' + renderLogItems() + '</div>' +
-      '</div>' +
-    '</div>' +
-    '</div>';
-
-  document.getElementById('tab-simulator').innerHTML = html;
-}
-
 function renderAnalysisTab(){
   return '<div class="tab-inner">' +
     '<div class="section-card">' +
@@ -1469,7 +977,7 @@ function renderAnalysisTab(){
         '</div>' +
         '<div class="analysis-card">' +
           '<h3>6. Контроль правильности</h3>' +
-          '<p>Под каждым правилом выводится текстовая формула и список действий. На вкладке «Симуляция» видно, какие листья условия истинны, какие из них вошли в выполненную ветку и какие действия будут запущены.</p>' +
+          '<p>Под каждым правилом выводится текстовая формула, действие и сообщения о некорректных настройках.</p>' +
         '</div>' +
       '</div>' +
     '</div>' +
@@ -1537,15 +1045,13 @@ function renderTab(tab){
   if(tab === 'rules'){
     renderRulesTab();
   }
-  if(tab === 'simulator'){
-    renderSimulatorTab();
-  }
   if(tab === 'json'){
     document.getElementById('tab-json').innerHTML = renderJsonTab();
   }
 }
 
 function switchTab(tab){
+  if(['analysis', 'rules', 'json'].indexOf(tab) < 0) return;
   appState.activeTab = tab;
 
   document.querySelectorAll('.tab').forEach(function(btn){
@@ -1596,7 +1102,6 @@ function closeModal(){
   document.getElementById('modalRoot').innerHTML = '';
   document.body.classList.remove('modal-open');
   appState.confirmCallback = null;
-  appState.fillModal = null;
 }
 
 function openConfirm(title, text, onConfirm){
@@ -1632,170 +1137,6 @@ function openValidationModal(title, errors, warnings){
   });
 }
 
-function openFillModal(fields, title, options){
-  if(!fields.length) return;
-  options = options || {};
-
-  appState.fillModal = {
-    fields: fields,
-    preview: Boolean(options.preview),
-    groups: options.groups || []
-  };
-
-  var fieldsHtml = fields.map(function(field){
-    var st = ensureFieldState(field.id);
-    var currentHint = st.curr ? ('Текущее значение: ' + escapeHtml(st.curr)) : 'Текущее значение: пусто';
-    var control;
-
-    if(field.type === 'file'){
-      control = '<input class="ui-input ui-input-file" type="file" data-action="fill-value" data-field-id="' + field.id + '" data-fill-control="1">';
-    } else {
-      control = '<input class="ui-input" type="text" value="' + escapeHtml(st.curr || '') + '" placeholder="Введите значение" data-action="fill-value" data-field-id="' + field.id + '" data-fill-control="1">';
-    }
-
-    return '<div class="fill-field" data-field-block="' + field.id + '">' +
-      '<label class="ui-form-label">' + escapeHtml(field.name) + '</label>' +
-      '<div class="field-meta">' +
-        '<span class="field-id">' + escapeHtml(field.id) + '</span>' +
-        '<span class="ui-badge ' + (field.type === 'file' ? 'ui-badge-warning' : 'ui-badge-info') + '">' + (field.type === 'file' ? 'Файл' : 'Строка') + '</span>' +
-        '<span class="muted-text">' + currentHint + '</span>' +
-      '</div>' +
-      control +
-      '<div class="field-error">Поле обязательно для заполнения</div>' +
-      '</div>';
-  }).join('');
-
-  var content = '<div class="ui-alert ui-alert-info">' +
-      'Проверка окна: ' + ((options.groups || []).map(function(group){ return (group.mode === 'any' ? 'заполните хотя бы одно поле из: ' : 'заполните все поля: ') + group.fields.map(function(field){ return field.name; }).join(', '); }).join('; ') || 'заполните указанные поля') +
-    '</div>' + fieldsHtml;
-
-  openModal({
-    title: title || 'Заполните обязательные поля',
-    content: content,
-    size: '',
-    footer:
-      '<button class="ui-btn ui-btn-light" data-action="close-modal">Отмена</button>' +
-      '<button class="ui-btn ui-btn-primary" data-action="submit-fill">' +
-        (options.preview ? 'Проверить и закрыть' : 'Заполнить и сохранить') +
-      '</button>',
-    onMount: function(){
-      var first = document.querySelector('#modalRoot [data-fill-control]');
-      if(first) first.focus();
-    }
-  });
-}
-
-function clearFillError(el){
-  var block = el.closest('[data-field-block]');
-  if(block) block.classList.remove('has-error');
-}
-
-function submitFillModal(){
-  if(!appState.fillModal) return;
-  var modal = appState.fillModal;
-  var states = {};
-  modal.fields.forEach(function(field){
-    var input = document.querySelector('#modalRoot [data-field-block="' + field.id + '"] [data-fill-control]');
-    var value = field.type === 'file'
-      ? (input.files && input.files[0] ? input.files[0].name : ensureFieldState(field.id).curr)
-      : String(input.value || '').trim();
-    states[field.id] = {curr:value};
-  });
-  var groups = modal.groups.length ? modal.groups : [{fields:modal.fields, mode:'all'}];
-  if(groups.some(function(group){ return !fillSatisfied(group.fields, group.mode, states); })){
-    toast('Выполните условия заполнения, указанные в окне', 'danger');
-    return;
-  }
-  if(!modal.preview) modal.fields.forEach(function(field){ ensureFieldState(field.id).curr = states[field.id].curr; });
-  closeModal();
-  toast(modal.preview ? 'Пример окна проверен' : 'Значения симуляции обновлены', 'success');
-  if(appState.activeTab === 'simulator') renderSimulatorTab();
-}
-
-function previewRuleFill(ruleId){
-  var rule = findRuleById(ruleId);
-  if(!rule) return;
-  var action = rule.action || {};
-  if(action.type !== 'fill'){
-    toast('Действие «Окно заполнения» не выбрано для этого правила', 'warning');
-    return;
-  }
-
-  var fields = fillFieldsForRule(rule);
-  if(!fields.length){
-    toast('В правиле нет полей для окна заполнения', 'warning');
-    return;
-  }
-
-  openFillModal(fields, action.fillWindowTitle || 'Заполните обязательные поля', {preview:true, groups:[{fields:fields, mode:action.fillMode || 'all'}]});
-  addLog('info', 'Открыт пример окна заполнения', fields.map(function(field){ return field.name; }).join(', '));
-}
-
-function uniqueFieldsFromGroups(groups){
-  var fields = [];
-  groups.forEach(function(group){
-    group.fields.forEach(function(field){
-      if(!fields.some(function(item){ return item.id === field.id; })) fields.push(field);
-    });
-  });
-  return fields;
-}
-
-function runCheck(ruleId){
-  var results = evaluateAllRules().filter(function(res){
-    return !ruleId || res.rule.id === ruleId;
-  });
-
-  var triggered = 0;
-  var launchedBpNames = [];
-  var fillGroups = [];
-
-  results.forEach(function(res){
-    if(!res.rule.enabled || !res.evalRes.ok) return;
-    triggered = triggered + 1;
-
-    var action = res.actions || {};
-    if(action.type === 'bp'){
-      var bp = getBp(action.bpId);
-      if(bp){
-        launchedBpNames.push(bp.name);
-        addLog('bp', 'Запущен бизнес-процесс «' + bp.name + '»', res.rule.title);
-      }
-    }
-
-    if(action.type === 'fill' && action.fillFields.length && !fillSatisfied(action.fillFields, action.fillMode, appState.fieldStates)){
-      fillGroups.push({
-        ruleId: res.rule.id,
-        ruleTitle: res.rule.title,
-        title: action.fillTitle,
-        fields: action.fillFields,
-        mode: action.fillMode
-      });
-    }
-  });
-
-  renderLog();
-
-  if(fillGroups.length){
-    var fields = uniqueFieldsFromGroups(fillGroups);
-    var title = fillGroups.length === 1 ? fillGroups[0].title : 'Заполните обязательные поля';
-    addLog('fill', 'Открыто окно заполнения', fields.map(function(field){ return field.name; }).join(', '));
-    renderLog();
-    openFillModal(fields, title, {preview:false, groups:fillGroups});
-  } else if(triggered){
-    toast('Условие выполнено. Запущено бизнес-процессов: ' + launchedBpNames.length, 'success');
-  } else {
-    var message = ruleId
-      ? 'Условие правила не выполнено. Действия не запускаются.'
-      : 'Ни одно правило не сработало.';
-    addLog('info', message);
-    renderLog();
-    toast(message, 'info');
-  }
-
-  if(appState.activeTab === 'simulator') renderSimulationResults();
-}
-
 function addRule(){
   var leaf = createLeaf(nextUnusedFieldId({root:createGroup('and',[])}));
   var rule = createRule('Новое правило', 'and', [leaf]);
@@ -1804,7 +1145,6 @@ function addRule(){
   if(appState.activeTab !== 'rules') switchTab('rules');
   else refreshRules();
 
-  addLog('info', 'Добавлено новое правило', rule.title);
   toast('Правило добавлено', 'success');
 
   setTimeout(function(){
@@ -1818,7 +1158,7 @@ function toggleRule(ruleId, enabled){
   if(!rule) return;
   rule.enabled = enabled;
   refreshRules();
-  addLog(enabled ? 'success' : 'warning', 'Правило ' + (enabled ? 'включено' : 'отключено'), rule.title);
+
 }
 
 function toggleRuleBody(ruleId){
@@ -1844,7 +1184,7 @@ function duplicateRule(ruleId){
   appState.rules.splice(index + 1, 0, clone);
 
   refreshRules();
-  addLog('info', 'Правило дублировано', clone.title);
+
   toast('Правило дублировано', 'success');
 }
 
@@ -1855,7 +1195,7 @@ function confirmDeleteRule(ruleId){
   openConfirm('Удалить правило?', 'Правило «' + (rule.title || 'без названия') + '» будет удалено.', function(){
     appState.rules = appState.rules.filter(function(item){ return item.id !== ruleId; });
     refreshRules();
-    addLog('warning', 'Правило удалено', rule.title);
+
     toast('Правило удалено', 'warning');
   });
 }
@@ -1917,7 +1257,7 @@ function confirmDeleteNode(nodeId){
     ctx.parent.children.splice(ctx.index, 1);
     refreshRules();
     updateRuleSummary(ctx.rule.id);
-    addLog('warning', 'Элемент условия удалён', ctx.rule.title);
+
     toast('Элемент удалён', 'warning');
   });
 }
@@ -1963,84 +1303,11 @@ function setLeafProp(nodeId, prop, value){
   updateRuleSummary(ctx.rule.id);
 }
 
-function applyFieldQuick(fieldId, mode){
-  var field = getField(fieldId);
-  if(!field) return;
-  var st = ensureFieldState(fieldId);
-
-  if(mode === 'clear'){
-    st.curr = '';
-  }
-  if(mode === 'fill'){
-    st.curr = sampleValue(field);
-  }
-  if(mode === 'change'){
-    st.prev = st.curr;
-    st.curr = sampleChangedValue(field);
-  }
-
-  renderSimulatorTab();
-}
-
-function applyScenario(mode){
-  var fields = getSimulationFields();
-  if(!fields.length){
-    toast('Нет полей включённых правил', 'warning');
-    return;
-  }
-
-  fields.forEach(function(field){
-    var st = ensureFieldState(field.id);
-
-    if(mode === 'clear'){
-      st.prev = '';
-      st.curr = '';
-    }
-
-    if(mode === 'fill'){
-      st.prev = '';
-      st.curr = sampleValue(field);
-    }
-
-    if(mode === 'change'){
-      st.prev = sampleValue(field);
-      st.curr = sampleChangedValue(field);
-    }
-
-    if(mode === 'random'){
-      var rand = Math.random();
-      if(rand < .25){
-        st.prev = '';
-        st.curr = '';
-      } else if(rand < .5){
-        st.prev = '';
-        st.curr = sampleValue(field);
-      } else if(rand < .75){
-        st.prev = sampleValue(field);
-        st.curr = sampleChangedValue(field);
-      } else {
-        st.prev = sampleValue(field);
-        st.curr = '';
-      }
-    }
-  });
-
-  var labels = {
-    clear:'все поля очищены',
-    fill:'все поля заполнены',
-    change:'все поля изменены',
-    random:'случайный сценарий'
-  };
-
-  renderSimulatorTab();
-  addLog('info', 'Применён тестовый сценарий', labels[mode] || mode);
-}
-
 function saveSettings(){
   var validation = validateAll();
 
   if(validation.errors.length){
-    addLog('error', 'Сохранение отменено: есть ошибки конфигурации');
+
     openValidationModal('Сохранение отменено', validation.errors, validation.warnings);
     return;
   }
@@ -2171,26 +1438,6 @@ function handleClick(event){
     case 'move-node':
       moveNode(el.dataset.nodeId, el.dataset.dir);
       break;
-    case 'preview-rule-fill':
-      previewRuleFill(el.dataset.ruleId);
-      break;
-    case 'sim-quick':
-      applyFieldQuick(el.dataset.fieldId, el.dataset.mode);
-      break;
-    case 'sim-scenario':
-      applyScenario(el.dataset.mode);
-      break;
-    case 'run-check':
-      runCheck(el.dataset.ruleId || null);
-      break;
-    case 'run-tests':
-      runLogicTests();
-      break;
-    case 'clear-log':
-      appState.log = [];
-      renderLog();
-      toast('Журнал очищен', 'info');
-      break;
     case 'copy-json':
       copyJson();
       break;
@@ -2201,9 +1448,6 @@ function handleClick(event){
       var callback = appState.confirmCallback;
       closeModal();
       if(callback) callback();
-      break;
-    case 'submit-fill':
-      submitFillModal();
       break;
     default:
       break;
@@ -2249,18 +1493,23 @@ function handleChange(event){
     updateRuleSummary(fillRule.id);
     return;
   }
+  if(action === 'set-rule-stage'){
+    var stageRule = findRuleById(el.dataset.ruleId);
+    if(!stageRule) return;
+    var stageIds = ruleStageIds(stageRule);
+    stageRule.stageIds = el.checked
+      ? (stageIds.indexOf(el.value) < 0 ? stageIds.concat(el.value) : stageIds)
+      : stageIds.filter(function(id){ return id !== el.value; });
+    el.closest('.fa-stage-picker').querySelector('.fa-fill-fields-count').textContent = stageSelectionText(stageRule);
+    updateRuleSummary(stageRule.id);
+    return;
+  }
   if(action === 'set-rule-stage-mode' || action === 'set-rule-fill-mode'){
     var editedRule = findRuleById(el.dataset.ruleId);
     if(!editedRule) return;
     if(action === 'set-rule-stage-mode') editedRule.stageMode = el.value;
     if(action === 'set-rule-fill-mode') editedRule.action.fillMode = el.value;
     refreshRules();
-    return;
-  }
-  if(action === 'sim-previous-stage' || action === 'sim-stage'){
-    if(action === 'sim-stage') appState.simStage = el.value;
-    else appState.simPreviousStage = el.value;
-    renderSimulationResults();
     return;
   }
 
@@ -2292,15 +1541,6 @@ function handleChange(event){
         }
         break;
       }
-      case 'set-rule-stage':{
-        var rule = findRuleById(el.dataset.ruleId);
-        if(rule){
-          rule.stageId = el.value;
-          refreshRules();
-          updateRuleSummary(rule.id);
-        }
-        break;
-      }
       case 'set-rule-fill-title':{
         var rule = findRuleById(el.dataset.ruleId);
         if(rule){
@@ -2316,9 +1556,6 @@ function handleChange(event){
     return;
   }
 
-  if(action === 'fill-value'){
-    clearFillError(el);
-  }
 }
 
 function handleInput(event){
@@ -2326,7 +1563,7 @@ function handleInput(event){
   var action = el.dataset.action;
   if(!action) return;
 
-  if(action === 'search-rule-fill-fields'){
+  if(action === 'search-rule-fill-fields' || action === 'search-rule-stages'){
     filterFillFieldPicker(el);
     return;
   }
@@ -2351,19 +1588,6 @@ function handleInput(event){
     return;
   }
 
-
-
-  if(action === 'sim-value'){
-    var st = ensureFieldState(el.dataset.fieldId);
-    st[el.dataset.field] = el.value;
-    updateFieldStatus(el.dataset.fieldId);
-    renderSimulationResults();
-    return;
-  }
-
-  if(action === 'fill-value'){
-    clearFillError(el);
-  }
 }
 
 function handleKeydown(event){
@@ -2405,18 +1629,10 @@ function bindEvents(){
 }
 
 function init(){
-  FIELD_CATALOG.forEach(function(field){
-    ensureFieldState(field.id);
-  });
 
   appState.rules = loadRules();
   bindEvents();
   switchTab('rules');
-  if(appState.rules.length){
-    addLog('info', 'Загружено правил: ' + appState.rules.length);
-  } else {
-    addLog('info', 'Правил нет. Создайте первое правило.');
-  }
 }
 
 BX.ready(init);

@@ -23,6 +23,17 @@ final class RuleConfig
 			{
 				throw new \InvalidArgumentException('Некорректное условие стадии.');
 			}
+			if (array_key_exists('stageIds', $rule))
+			{
+				if (!is_array($rule['stageIds']) || array_values($rule['stageIds']) !== $rule['stageIds'])
+				{
+					throw new \InvalidArgumentException('Некорректный список стадий.');
+				}
+				foreach ($rule['stageIds'] as $stageId)
+				{
+					if (!is_string($stageId) || trim($stageId) === '') throw new \InvalidArgumentException('Некорректный код стадии.');
+				}
+			}
 			$count = 0;
 			self::node($rule['condition'] ?? null, 0, $count, $rule['enabled']);
 			$action = $rule['action'] ?? [];
