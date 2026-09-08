@@ -14,7 +14,21 @@ final class FillController extends Controller
 	public function configureActions(): array
 	{
 		$filters = static fn () => [new ActionFilter\Authentication(), new ActionFilter\HttpMethod(['POST']), new ActionFilter\Csrf()];
-		return ['load' => ['prefilters' => $filters()], 'save' => ['prefilters' => $filters()]];
+		return ['load' => ['prefilters' => $filters()], 'save' => ['prefilters' => $filters()], 'trace' => ['prefilters' => $filters()]];
+	}
+
+	public function traceAction(string $trace): ?array
+	{
+		try
+		{
+			if (!Loader::includeModule('crm')) throw new \RuntimeException('Модуль CRM недоступен.');
+			return Diagnostics::readTrace($trace);
+		}
+		catch (\Throwable $e)
+		{
+			$this->addError(new Error($e->getMessage(), 'FIELDAUDIT_TRACE'));
+			return null;
+		}
 	}
 
 	public function loadAction(string $token): ?array
@@ -24,13 +38,14 @@ final class FillController extends Controller
 		{
 			$challenge = $this->getAllowedChallenge($token);
 			$catalog = FieldCatalog::get();
+			$states = DealState::states($challenge['before'], $challenge['changes']);
 			$fields = [];
 			foreach ($challenge['requirements'] as $requirement)
 			{
 				foreach ($requirement['fieldIds'] as $id)
 				{
 					$field = $catalog[$id] ?? ['id' => $id, 'name' => $id, 'type' => 'unsupported', 'editable' => false];
-					$value = $challenge['changes'][$id] ?? $challenge['before'][$id] ?? '';
+					$value = $states[$id]['curr'] ?? '';
 					$field['value'] = $field['type'] === 'file' ? '' : $value;
 					$field['filled'] = RuleEngine::isFilled($value);
 					$fields[$id] = $field;
@@ -90,10 +105,15 @@ final class FillController extends Controller
 				// Файл сохраняется штатным обработчиком UF в составе обновления сделки.
 				if ($catalog[$id]['multiple'])
 				{
-					$existing = (array)($before[$id] ?? []);
-					$changes[$id] = array_merge(array_map(static fn ($value) => ['old_id' => $value], $existing), [$file]);
+					// Сохраняем оставшиеся файлы и операции удаления из отклонённого запроса.
+					$existing = array_key_exists($id, $changes) ? $changes[$id] : ($before[$id] ?? []);
+					$changes[$id] = array_merge(FileState::entries($existing, true), [$file]);
 				}
-				else $changes[$id] = $file;
+				else
+				{
+					if (!empty($before[$id])) $file['old_id'] = $before[$id];
+					$changes[$id] = $file;
+				}
 			}
 
 			$states = DealState::states($before, $changes);

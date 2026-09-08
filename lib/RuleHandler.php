@@ -48,10 +48,13 @@ final class RuleHandler
 
 		try
 		{
+			Diagnostics::beginFields($id, $rules);
 			$before = DealState::load($id);
-			$states = DealState::states($before, $arFields);
 			$context = DealState::context($before, $arFields);
 			Diagnostics::write('rules.begin', ['dealId' => $id] + $context);
+			$proposed = FileState::withRequestDeletions($before, $arFields, $id);
+			$states = DealState::states($before, $proposed);
+			Diagnostics::fieldValues($id, $before, $proposed, $states);
 			$requirements = RuleEngine::getFillRequirements($rules, $states, $context,
 				static function (string $event, array $data) use ($id): void {
 					Diagnostics::write($event, ['dealId' => $id] + $data);
@@ -69,7 +72,7 @@ final class RuleHandler
 				$prefix = $requirement['mode'] === 'any' ? 'Заполните хотя бы одно поле' : 'Заполните все поля';
 				$messages[] = self::buildFillMessage($prefix, $requirement['fieldIds']);
 			}
-			$token = FillChallenge::create($id, $before, $arFields, $requirements);
+			$token = FillChallenge::create($id, $before, $proposed, $requirements);
 			Integration::publishChallenge($token);
 			$arFields['RESULT_MESSAGE'] = implode('; ', $messages)
 				. ($token !== '' ? ' [DERYKAMS_FIELDAUDIT:' . $token . ']' : '');
@@ -108,6 +111,7 @@ final class RuleHandler
 			$snapshot = self::$snapshots[$id] ?? null;
 			unset(self::$snapshots[$id]);
 			if ($snapshot === null) return true;
+			Diagnostics::detail('deal.saved', ['dealId' => $id]);
 			$states = $snapshot['states'];
 			$context = $snapshot['context'];
 			$triggered = RuleEngine::evaluateRules($rules, $states, $context);

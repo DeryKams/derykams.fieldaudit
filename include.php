@@ -12,6 +12,7 @@ Loader::registerAutoLoadClasses(
 		'Derykams\FieldAudit\RuleHandler' => 'lib/RuleHandler.php',
 		'Derykams\FieldAudit\SettingsController' => 'lib/SettingsController.php',
 		'Derykams\FieldAudit\DealState' => 'lib/DealState.php',
+		'Derykams\FieldAudit\FileState' => 'lib/FileState.php',
 		'Derykams\FieldAudit\FieldCatalog' => 'lib/FieldCatalog.php',
 		'Derykams\FieldAudit\FillChallenge' => 'lib/FillChallenge.php',
 		'Derykams\FieldAudit\FillController' => 'lib/FillController.php',

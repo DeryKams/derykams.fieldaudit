@@ -19,6 +19,7 @@
   var seen = Object.create(null);
   var queue = [];
   var progressControls = Object.create(null);
+  var debugSeen = Object.create(null);
   var marker = /\[DERYKAMS_FIELDAUDIT:([a-f0-9]{48})\]/g;
 
   function clean(value) {
@@ -51,6 +52,7 @@
     return fetch('/bitrix/services/main/ajax.php?action=derykams:fieldaudit.FillController.' + action, {
       method: 'POST', credentials: 'same-origin', body: data
     }).then(function (response) {
+      readDiagnostics(response.headers.get('X-Derykams-FieldAudit-Debug'));
       if (!response.ok) throw new Error('Сервер недоступен (' + response.status + '). Повторите попытку.');
       return response.json();
     }).then(function (response) {
@@ -61,6 +63,21 @@
       }
       log('request.success', {action: action, dealId: response.data && response.data.dealId});
       return response.data;
+    });
+  }
+
+  function readDiagnostics(trace) {
+    if (!trace || !/^[a-f0-9]{32}$/.test(trace) || debugSeen[trace]) return;
+    debugSeen[trace] = true;
+    var keys = Object.keys(debugSeen);
+    if (keys.length > 200) delete debugSeen[keys[0]];
+    request('trace', {trace: trace}).then(function (data) {
+      (data.records || []).forEach(function (record) {
+        log('server.' + record.event, {trace: trace, serverTime: record.time, details: record.data});
+      });
+      if (data.truncated) log('server.trace_truncated', {trace: trace}, 'warn');
+    }).catch(function (error) {
+      log('server.trace_error', {trace: trace, message: clean(error.message)}, 'warn');
     });
   }
 
@@ -245,6 +262,7 @@
     var fromHeader = [];
     if (xhr && typeof xhr.getResponseHeader === 'function') {
       try {
+        readDiagnostics(xhr.getResponseHeader('X-Derykams-FieldAudit-Debug'));
         fromHeader = (xhr.getResponseHeader('X-Derykams-FieldAudit') || '').split(',').map(function (value) { return value.trim(); })
           .filter(function (value) { return /^[a-f0-9]{48}$/.test(value); });
         fromHeader.forEach(function (token) { if (found.indexOf(token) < 0) found.push(token); });
