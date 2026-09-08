@@ -158,11 +158,11 @@ $faAssetsVersion = max(filemtime(__DIR__ . '/../install/js/derykams.fieldaudit/s
 /* Заголовок страницы в шапке админки */
 $APPLICATION->SetTitle(Loc::getMessage('DERYKAMS_FA_PAGE_TITLE'));
 
-/* CSS примера (отскоуплен под .fa-root) в <head> */
+/* Оформление настроек изолировано под .fa-root. */
 $APPLICATION->SetAdditionalCSS($faAssetsPath . 'settings.css?v=' . $faAssetsVersion);
 
 /* BX нужен для settings.js: BX.ready + BX.message('bitrix_sessid') */
-\Bitrix\Main\UI\Extension::load(['main.core']);
+\Bitrix\Main\UI\Extension::load(['main.core', 'ui.design-tokens']);
 
 /* Пролог админки «после» — шапка, левое меню, начало контента */
 require($_SERVER['DOCUMENT_ROOT'] . '/bitrix/modules/main/include/prolog_admin_after.php');

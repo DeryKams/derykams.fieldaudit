@@ -525,7 +525,7 @@ function fieldOptionsHtml(nodeId, query, selectedFieldId){
 function openFieldDropdown(nodeId){
   var combo = fieldComboEl(nodeId);
   if(!combo) return;
-  var dd = combo.querySelector('.fa-combo-dropdown');
+  var dd = combo.faDropdown || combo.querySelector('.fa-combo-dropdown');
   if(dd.classList.contains('open')) return;
 
   var ctx = findNodeContext(nodeId);
@@ -534,12 +534,29 @@ function openFieldDropdown(nodeId){
   dd.innerHTML = fieldOptionsHtml(nodeId, '', selectedFieldId);
   dd.classList.add('open');
 
-  var r = combo.querySelector('.fa-combo-search').getBoundingClientRect();
-  var width = Math.min(Math.max(r.width, 640), window.innerWidth - 32);
+  positionFieldDropdown(combo, dd);
+}
+
+// Keep the floating list outside layout containers so fixed coordinates use the viewport.
+function positionFieldDropdown(combo, dd){
+  combo.faDropdown = dd;
+  combo.closest('.fa-root').appendChild(dd);
+  var rect = combo.querySelector('.fa-combo-search').getBoundingClientRect();
+  var viewport = window.visualViewport;
+  var left = viewport ? viewport.offsetLeft : 0;
+  var top = viewport ? viewport.offsetTop : 0;
+  var viewportWidth = viewport ? viewport.width : window.innerWidth;
+  var viewportHeight = viewport ? viewport.height : window.innerHeight;
+  var width = Math.max(0, Math.min(Math.max(rect.width, 640), viewportWidth - 24));
+  var below = Math.max(0, top + viewportHeight - rect.bottom - 16);
+  var above = Math.max(0, rect.top - top - 16);
+  var upwards = below < 200 && above > below;
+  var height = Math.min(300, upwards ? above : below);
   dd.style.position = 'fixed';
-  dd.style.top = (r.bottom + 4) + 'px';
-  dd.style.left = Math.max(16, Math.min(r.left, window.innerWidth - width - 16)) + 'px';
   dd.style.width = width + 'px';
+  dd.style.maxHeight = height + 'px';
+  dd.style.left = Math.max(left + 12, Math.min(rect.left, left + viewportWidth - width - 12)) + 'px';
+  dd.style.top = (upwards ? Math.max(top + 12, rect.top - dd.offsetHeight - 4) : rect.bottom + 4) + 'px';
 }
 
 function filterFieldDropdown(nodeId, query){
@@ -547,17 +564,20 @@ function filterFieldDropdown(nodeId, query){
   if(!combo) return;
   var ctx = findNodeContext(nodeId);
   var selectedFieldId = (ctx && ctx.node.type === 'leaf') ? ctx.node.fieldId : '';
-  var dd = combo.querySelector('.fa-combo-dropdown');
+  var dd = combo.faDropdown || combo.querySelector('.fa-combo-dropdown');
   dd.innerHTML = fieldOptionsHtml(nodeId, query, selectedFieldId);
   dd.classList.add('open');
+  positionFieldDropdown(combo, dd);
 }
 
 function closeFieldDropdown(nodeId){
   var combo = fieldComboEl(nodeId);
   if(!combo) return;
-  var dd = combo.querySelector('.fa-combo-dropdown');
+  var dd = combo.faDropdown || combo.querySelector('.fa-combo-dropdown');
   dd.classList.remove('open');
   dd.innerHTML = '';
+  combo.appendChild(dd);
+  combo.faDropdown = null;
 }
 
 function resetFieldComboInput(combo){
@@ -571,10 +591,9 @@ function resetFieldComboInput(combo){
 
 function closeAllFieldDropdowns(){
   document.querySelectorAll('.fa-combo').forEach(function(combo){
-    var dd = combo.querySelector('.fa-combo-dropdown');
+    var dd = combo.faDropdown || combo.querySelector('.fa-combo-dropdown');
     if(dd.classList.contains('open')){
-      dd.classList.remove('open');
-      dd.innerHTML = '';
+      closeFieldDropdown(combo.dataset.nodeId);
       resetFieldComboInput(combo);
     }
   });
@@ -784,10 +803,10 @@ function renderStageCondition(rule){
   return '<div class="rule-stage-condition">' +
     '<div class="rule-section-title">2. Дополнительное условие: стадия сделки</div>' +
     '<div class="rule-stage-controls">' +
-      '<select class="ui-select" data-action="set-rule-stage-mode" data-rule-id="' + rule.id + '">' +
+      '<label class="stage-mode">Когда проверять<select class="ui-select" data-action="set-rule-stage-mode" data-rule-id="' + rule.id + '">' +
         optionHtml('changed_to', 'Сделка переходит на одну из выбранных стадий', (rule.stageMode || 'changed_to') === 'changed_to', false) +
         optionHtml('is', 'Сделка находится на одной из выбранных стадий', rule.stageMode === 'is', false) +
-      '</select>' +
+      '</select></label>' +
       renderStagePicker(rule) +
     '</div><div class="cell-hint">Условия полей И любая из выбранных стадий. Если стадии не выбраны — без ограничения по стадии.</div>' +
     (!STAGE_CATALOG.length ? '<div class="ui-alert ui-alert-warning">Стадии не загружены. Проверьте доступность CRM и воронок.</div>' : '') +
@@ -926,6 +945,7 @@ function renderRulesTab(){
 }
 
 function refreshRules(){
+  closeAllFieldDropdowns();
   var scrolls = {};
   document.querySelectorAll('.rule-card').forEach(function(card){
     var builder = card.querySelector('.builder');
@@ -1052,6 +1072,7 @@ function renderTab(tab){
 
 function switchTab(tab){
   if(['analysis', 'rules', 'json'].indexOf(tab) < 0) return;
+  closeAllFieldDropdowns();
   appState.activeTab = tab;
 
   document.querySelectorAll('.tab').forEach(function(btn){
@@ -1380,7 +1401,7 @@ function downloadJson(){
 }
 
 function handleClick(event){
-  var comboHit = event.target.closest('.fa-combo');
+  var comboHit = event.target.closest('.fa-combo, .fa-combo-dropdown');
   if(!comboHit) closeAllFieldDropdowns();
 
   var el = event.target.closest('[data-action]');
@@ -1615,6 +1636,11 @@ function handleKeydown(event){
 }
 
 function bindEvents(){
+  window.addEventListener('resize', closeAllFieldDropdowns);
+  if(window.visualViewport){
+    window.visualViewport.addEventListener('resize', closeAllFieldDropdowns);
+    window.visualViewport.addEventListener('scroll', closeAllFieldDropdowns);
+  }
   document.addEventListener('click', handleClick);
   document.addEventListener('change', handleChange);
   document.addEventListener('input', handleInput);

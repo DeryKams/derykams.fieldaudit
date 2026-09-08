@@ -1,11 +1,37 @@
-.fa-runtime { max-height: 65vh; overflow: auto; padding: 8px 12px; color: #333; }
-.fa-runtime-requirements { padding: 4px 14px; background: #eaf5fc; border-radius: 6px; margin-bottom: 18px; }
-.fa-runtime-field { margin: 16px 0; }
-.fa-runtime-field label { display: block; font-weight: 600; margin-bottom: 7px; }
-.fa-runtime-field small { display: block; margin-top: 6px; color: #626b75; }
-.fa-runtime-input { box-sizing: border-box; width: 100%; min-height: 38px; padding: 8px; border: 1px solid #bdc5ce; border-radius: 4px; }
-.fa-runtime textarea { min-height: 90px; }
-.fa-runtime-date-row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
-.fa-runtime-date-row .fa-runtime-input { flex: 1; min-width: 0; }
-.fa-runtime-dates button { cursor: pointer; padding: 6px 10px; }
-.fa-runtime-error { color: #b42318; white-space: pre-line; padding-top: 10px; }
+/* The real CRM popup uses the same field metrics and palette as ui.forms. */
+.fa-runtime {
+  box-sizing:border-box; min-width:0; max-width:100%;
+  max-height:60vh; max-height:60dvh; overflow:auto; overscroll-behavior:contain;
+  padding:8px 12px; color:var(--ui-color-base-90, #525c69);
+  font:14px/1.5 var(--ui-font-family-primary, 'Helvetica Neue', Arial, sans-serif);
+  overflow-wrap:anywhere;
+}
+.fa-runtime *, .fa-runtime *::before, .fa-runtime *::after { box-sizing:border-box; }
+.fa-runtime-requirements { padding:12px 16px; background:var(--ui-color-palette-blue-15, #e5f9ff); border-radius:4px; margin-bottom:20px; }
+.fa-runtime-requirements p { margin:0 0 8px; }
+.fa-runtime-requirements p:last-child { margin-bottom:0; }
+.fa-runtime-field { min-width:0; margin:20px 0; }
+.fa-runtime-field label { display:block; font-weight:400; margin-bottom:8px; }
+.fa-runtime-field small { display:block; margin-top:6px; color:var(--ui-color-base-60, #828b95); }
+.fa-runtime-input { width:100%; min-width:0; max-width:100%; min-height:39px; padding:8px 11px; border:1px solid #c6cdd3; border-radius:4px; background:#fff; color:inherit; font:inherit; }
+.fa-runtime-input:focus { outline:none; border-color:var(--ui-color-primary, #2fc6f6); box-shadow:0 0 0 1px var(--ui-color-primary, #2fc6f6); }
+.fa-runtime-input:disabled { background:#f4f4f4; color:#828b95; cursor:not-allowed; }
+.fa-runtime input[type="file"] { overflow:hidden; }
+.fa-runtime input[type="file"]::file-selector-button { margin-right:8px; padding:5px 10px; border:1px solid #c6cdd3; border-radius:4px; background:#fff; color:#525c69; cursor:pointer; }
+.fa-runtime textarea { min-height:90px; resize:vertical; }
+.fa-runtime-date-row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:8px; }
+.fa-runtime-date-row .fa-runtime-input { flex:1 1 200px; min-width:0; }
+.fa-runtime-dates button { min-height:31px; max-width:100%; padding:5px 12px; border:1px solid #c6cdd3; border-radius:4px; background:#fff; color:#525c69; font:600 12px/20px Arial,sans-serif; cursor:pointer; }
+.fa-runtime-dates button:focus-visible { outline:2px solid #2fc6f6; outline-offset:2px; }
+.fa-runtime-error { color:#d83b36; white-space:pre-line; padding-top:10px; }
+/* Limit the framework shell too, including after a viewport resize. */
+#derykams-fieldaudit-fill, #derykams-fieldaudit-error { box-sizing:border-box; max-width:calc(100vw - 24px); }
+#derykams-fieldaudit-fill .popup-window-titlebar, #derykams-fieldaudit-error .popup-window-titlebar { height:auto; min-height:49px; }
+#derykams-fieldaudit-fill .popup-window-titlebar-text, #derykams-fieldaudit-error .popup-window-titlebar-text { white-space:normal; overflow-wrap:anywhere; line-height:1.4; padding-top:12px; padding-bottom:12px; }
+#derykams-fieldaudit-fill .popup-window-buttons { display:flex; flex-wrap:wrap; justify-content:center; gap:8px; padding:16px 12px; }
+#derykams-fieldaudit-fill .popup-window-button { height:auto; min-height:39px; max-width:100%; margin:0; white-space:normal; overflow-wrap:anywhere; line-height:20px; padding:9px 16px; }
+@media (max-width:480px) {
+  .fa-runtime { padding:4px; max-height:55vh; max-height:55dvh; }
+  .fa-runtime-requirements { padding:10px; }
+  #derykams-fieldaudit-fill .popup-window-button { flex:1 1 100%; }
+}
