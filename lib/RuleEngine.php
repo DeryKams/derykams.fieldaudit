@@ -313,7 +313,7 @@ final class RuleEngine
 		{
 			$flat = array_filter(
 				$value,
-				static fn ($v) => $v !== null && $v !== '' && $v !== [] && $v !== 0 && $v !== '0'
+				static fn ($v) => $v !== null && $v !== '' && $v !== []
 			);
 
 			return $flat === [] ? '' : Json::encode($value, JSON_UNESCAPED_UNICODE);

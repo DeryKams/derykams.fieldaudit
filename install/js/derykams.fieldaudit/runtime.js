@@ -90,7 +90,36 @@
 
   function createInput(field) {
     var input;
-    if (field.type === 'enumeration' || field.type === 'boolean') {
+    if ((field.type === 'date' || field.type === 'datetime') && field.multiple) {
+      input = node('div', null, 'fa-runtime-dates');
+      var rows = node('div');
+      var index = 0;
+      function addDate(value) {
+        var row = node('div', null, 'fa-runtime-date-row');
+        var control = createInput(Object.assign({}, field, {multiple: false, value: value}));
+        control.id += '-' + index++;
+        control.setAttribute('aria-label', field.name);
+        var remove = node('button', 'Удалить');
+        remove.type = 'button';
+        remove.disabled = !field.editable;
+        remove.addEventListener('click', function () {
+          if (rows.children.length === 1) control.value = '';
+          else row.remove();
+        });
+        row.appendChild(control);
+        row.appendChild(remove);
+        rows.appendChild(row);
+      }
+      var dates = Array.isArray(field.value) ? field.value : [field.value];
+      (dates.length ? dates : ['']).forEach(addDate);
+      var add = node('button', 'Добавить дату');
+      add.type = 'button';
+      add.disabled = !field.editable;
+      add.addEventListener('click', function () { addDate(''); rows.lastElementChild.querySelector('input').focus(); });
+      input.appendChild(rows);
+      input.appendChild(add);
+      return input;
+    } else if (field.type === 'enumeration' || field.type === 'boolean') {
       input = node('select');
       input.multiple = Boolean(field.multiple);
       var entries = field.type === 'boolean' ? [{id: '1', name: 'Да'}, {id: '0', name: 'Нет'}] : field.items;
@@ -101,13 +130,13 @@
       });
     } else if (field.multiple && field.type !== 'file') {
       input = node('textarea');
-      input.value = (Array.isArray(field.value) ? field.value : [field.value || '']).join('\n');
+      input.value = (Array.isArray(field.value) ? field.value : [field.value == null ? '' : field.value]).join('\n');
       input.placeholder = 'Каждое значение с новой строки';
     } else {
       input = node('input');
-      input.type = field.type === 'file' ? 'file' : 'text';
-      if (field.type !== 'file') input.value = field.value === null ? '' : String(field.value || '');
-      if (field.type === 'date' || field.type === 'datetime') input.placeholder = 'Дата в формате вашего портала';
+      input.type = field.type === 'datetime' ? 'datetime-local' : (field.type === 'date' ? 'date' : (field.type === 'file' ? 'file' : 'text'));
+      if (field.type === 'datetime') input.step = '1';
+      if (field.type !== 'file') input.value = field.value == null ? '' : String(field.value);
     }
     input.id = 'fa-fill-' + field.id;
     input.className = 'fa-runtime-input';
@@ -130,9 +159,9 @@
     data.fields.forEach(function (field) {
       var block = node('div', null, 'fa-runtime-field');
       var label = node('label', field.name);
-      label.htmlFor = 'fa-fill-' + field.id;
       block.appendChild(label);
       var input = createInput(field);
+      label.htmlFor = input.classList.contains('fa-runtime-dates') ? input.querySelector('input').id : input.id;
       controls[field.id] = input;
       block.appendChild(input);
       if (field.type === 'file' && field.filled) block.appendChild(node('small', 'Файл уже заполнен. Можно оставить его или выбрать новый.'));
@@ -148,6 +177,10 @@
       text: 'Сохранить и продолжить', className: 'popup-window-button-accept',
       events: {click: function () {
         if (submitting) return;
+        var invalid = Array.from(root.querySelectorAll('input,select,textarea')).find(function (control) {
+          return !control.disabled && !control.checkValidity();
+        });
+        if (invalid) { invalid.reportValidity(); return; }
         var values = {};
         var filled = {};
         var form = new FormData();
@@ -163,7 +196,9 @@
             }
           } else {
             var value = field.multiple
-              ? (input.tagName === 'SELECT' ? Array.from(input.selectedOptions).map(function (option) { return option.value; }) : input.value.split('\n').map(function (line) { return line.trim(); }).filter(Boolean))
+              ? (input.classList.contains('fa-runtime-dates')
+                ? Array.from(input.querySelectorAll('input')).map(function (control) { return control.value; }).filter(Boolean)
+                : (input.tagName === 'SELECT' ? Array.from(input.selectedOptions).map(function (option) { return option.value; }) : input.value.split('\n').map(function (line) { return line.trim(); }).filter(Boolean)))
               : input.value.trim();
             filled[field.id] = Array.isArray(value) ? value.length > 0 : value !== '';
             // Не перезаписываем неизменённые поля, включая пустые альтернативы.

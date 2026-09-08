@@ -48,6 +48,11 @@ final class FillController extends Controller
 					$value = $states[$id]['curr'] ?? '';
 					$field['value'] = $field['type'] === 'file' ? '' : $value;
 					$field['filled'] = RuleEngine::isFilled($value);
+					if (in_array($field['type'], ['date', 'datetime'], true))
+					{
+						$convert = fn ($item) => $this->calendarValue($field, (string)($item ?? ''), true);
+						$field['value'] = !empty($field['multiple']) ? array_map($convert, (array)$value) : $convert($value);
+					}
 					$fields[$id] = $field;
 				}
 			}
@@ -179,6 +184,7 @@ final class FillController extends Controller
 			if (!is_scalar($item) && $item !== null) throw new \RuntimeException('Некорректное значение: ' . $field['name']);
 			$item = trim((string)$item);
 			if ($item === '') continue;
+			if (in_array($field['type'], ['date', 'datetime'], true)) $item = $this->calendarValue($field, $item, false);
 			if ($field['type'] === 'integer' && !preg_match('/^-?\d+$/D', $item)) throw new \RuntimeException('Введите целое число: ' . $field['name']);
 			if ($field['type'] === 'double' && !is_numeric($item)) throw new \RuntimeException('Введите число: ' . $field['name']);
 			if ($field['type'] === 'boolean' && !in_array($item, ['0', '1'], true)) throw new \RuntimeException('Некорректное значение Да/Нет.');
@@ -186,5 +192,27 @@ final class FillController extends Controller
 			$normalized[] = $item;
 		}
 		return $field['multiple'] ? $normalized : ($normalized[0] ?? '');
+	}
+
+	/** Обмен с date/datetime-local без перевода часового пояса браузера/сервера. */
+	private function calendarValue(array $field, string $value, bool $toInput): string
+	{
+		if (trim($value) === '') return '';
+		$isDate = $field['type'] === 'date';
+		$portalFormat = $isDate ? \Bitrix\Main\Type\Date::getFormat() : \Bitrix\Main\Type\DateTime::getFormat();
+		$inputFormat = $isDate ? 'Y-m-d' : 'Y-m-d\TH:i:s';
+		$formats = $toInput ? [$portalFormat] : [$inputFormat];
+		if (!$isDate) $formats[] = $toInput ? str_replace(':s', '', $portalFormat) : 'Y-m-d\TH:i';
+		foreach (array_unique($formats) as $format)
+		{
+			$parsed = \DateTimeImmutable::createFromFormat('!' . $format, $value, new \DateTimeZone('UTC'));
+			$errors = \DateTimeImmutable::getLastErrors();
+			if ($parsed && (!$errors || (!$errors['warning_count'] && !$errors['error_count'])) && $parsed->format($format) === $value)
+			{
+				// Часовой пояс UF применит штатный DateTimeType::onBeforeSave ровно один раз.
+				return $parsed->format($toInput ? $inputFormat : $portalFormat);
+			}
+		}
+		throw new \RuntimeException('Некорректная дата' . ($isDate ? '' : ' и время') . ': ' . $field['name']);
 	}
 }

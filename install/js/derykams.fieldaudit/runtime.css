@@ -5,4 +5,7 @@
 .fa-runtime-field small { display: block; margin-top: 6px; color: #626b75; }
 .fa-runtime-input { box-sizing: border-box; width: 100%; min-height: 38px; padding: 8px; border: 1px solid #bdc5ce; border-radius: 4px; }
 .fa-runtime textarea { min-height: 90px; }
+.fa-runtime-date-row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+.fa-runtime-date-row .fa-runtime-input { flex: 1; min-width: 0; }
+.fa-runtime-dates button { cursor: pointer; padding: 6px 10px; }
 .fa-runtime-error { color: #b42318; white-space: pre-line; padding-top: 10px; }
